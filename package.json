@@ -29,7 +29,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@playwright/test": "^1.64.1",
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.6.6",
     "concurrently": "^9.0.0",
     "eslint": "^10.0.0",
     "globals": "^16.0.0",
