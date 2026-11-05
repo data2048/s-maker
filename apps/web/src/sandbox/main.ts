@@ -47,6 +47,7 @@ initAudioOnFirstClick();
 let lastCodeFromParent = '';
 let codeTimer: ReturnType<typeof setTimeout> | undefined;
 let lastState = '';
+let isPlaying = false;
 
 const editor = new StrudelMirror({
   root: $('editor'),
@@ -125,6 +126,7 @@ wrapBtn.addEventListener('click', () => changeSettings({ lineWrap: !settings.lin
 applySettings(settings);
 
 function renderState(started: boolean, pending: boolean, error: string | null): void {
+  isPlaying = started;
   playBtn.textContent = started ? 'Update' : 'Play';
   playBtn.disabled = pending;
   stopBtn.disabled = !started;
@@ -135,6 +137,19 @@ function renderState(started: boolean, pending: boolean, error: string | null): 
 
 playBtn.addEventListener('click', () => void editor.evaluate());
 stopBtn.addEventListener('click', () => void editor.stop());
+
+// Ctrl+Enter (Cmd+Enter on Mac) toggles play/stop. Strudel's own binding (kept for Alt+Enter) re-evaluates
+// the code, i.e. applies changes while playing. Capture phase: runs before CodeMirror's keymap.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void (isPlaying ? editor.stop() : editor.evaluate());
+  },
+  true,
+);
 
 window.addEventListener('message', (event: MessageEvent) => {
   // Accept commands only from the page that embeds us.

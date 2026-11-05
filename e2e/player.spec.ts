@@ -133,3 +133,21 @@ test('font size can be changed and is remembered', async ({ page }) => {
     'true',
   );
 });
+
+test('Ctrl+Enter toggles play/stop, Alt+Enter updates without stopping', async ({ page }) => {
+  await login(page);
+  await page.goto('/playground');
+  await playerReady(page);
+  const player = page.frameLocator('iframe[title="Strudel player"]');
+  await player.locator('.cm-content').click();
+
+  await page.keyboard.press('Control+Enter');
+  await expect(page.getByText('● playing')).toBeVisible({ timeout: 30_000 });
+
+  await page.keyboard.press('Alt+Enter');
+  await page.waitForTimeout(500);
+  await expect(page.getByText('● playing')).toBeVisible();
+
+  await page.keyboard.press('Control+Enter');
+  await playerReady(page);
+});

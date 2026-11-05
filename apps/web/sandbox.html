@@ -7,11 +7,19 @@
   </head>
   <body>
     <div class="sb-toolbar">
-      <button type="button" id="play" class="sb-btn primary" disabled>Loading…</button>
+      <button
+        type="button"
+        id="play"
+        class="sb-btn primary"
+        title="Play: Ctrl+Enter · Update while playing: Alt+Enter"
+        disabled
+      >
+        Loading…
+      </button>
       <button type="button" id="stop" class="sb-btn" disabled>Stop</button>
       <span id="status" class="sb-status"></span>
       <span class="sb-spacer"></span>
-      <span class="sb-hint">Ctrl+Enter play/update · Ctrl+. stop</span>
+      <span class="sb-hint">Ctrl+Enter play/stop · Alt+Enter update</span>
       <span class="sb-group" role="group" aria-label="Font size">
         <button
           type="button"
