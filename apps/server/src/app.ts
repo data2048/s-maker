@@ -1,10 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import fastifyHelmet from '@fastify/helmet';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { Config } from './config';
 import type { Db } from './db';
+import authPlugin from './auth/plugin';
+import { authRoutes } from './auth/routes';
 import { healthRoutes } from './routes/health';
 
 export interface AppDeps {
@@ -69,7 +72,12 @@ export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance
     return reply.status(status).send({ error: error.message });
   });
 
+  // Generous global limit per client IP; auth endpoints set stricter limits per route.
+  await app.register(fastifyRateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+
   await app.register(healthRoutes);
+  await app.register(authPlugin);
+  await app.register(authRoutes);
 
   const webDist = config.webDist;
   if (webDist && existsSync(join(webDist, 'index.html'))) {

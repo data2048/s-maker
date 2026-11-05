@@ -50,6 +50,11 @@ Later deploys: `bash ~/s-maker/repo/deploy.sh [branch]`. The script backs up the
 the container, waits for `/health` and rolls back automatically if the new version fails.
 Point your reverse proxy (HTTPS) at `BIND_ADDRESS:44566`.
 
+**First start:** there are no accounts yet. The app prints a one-time `ADMIN SETUP LINK` (deploy.sh shows it,
+or run `docker logs s-maker | grep "ADMIN SETUP"`). Open it to create the admin account (username from
+`ADMIN_USERNAME`), then invite friends from **Admin → Invites**. The link is valid for 24 h; restarting the
+container while no account exists prints a new one.
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE), like Strudel itself. If you host a modified version for others,
