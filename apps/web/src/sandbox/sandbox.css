@@ -1,0 +1,105 @@
+:root {
+  --sb-bg: #14131a;
+  --sb-elev: #1d1b26;
+  --sb-border: #34304a;
+  --sb-text: #ece9f5;
+  --sb-muted: #9b96b0;
+  --sb-accent: #a77bff;
+  --sb-danger: #ff7a90;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--sb-bg);
+  color: var(--sb-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.sb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--sb-elev);
+  border-bottom: 1px solid var(--sb-border);
+  flex: none;
+}
+
+.sb-btn {
+  font: inherit;
+  color: var(--sb-text);
+  background: transparent;
+  border: 1px solid var(--sb-border);
+  border-radius: 7px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.sb-btn.primary {
+  background: var(--sb-accent);
+  border-color: var(--sb-accent);
+  color: #fff;
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.sb-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sb-status {
+  color: var(--sb-muted);
+  font-size: 0.85rem;
+}
+
+.sb-spacer {
+  flex: 1;
+}
+
+.sb-hint {
+  color: var(--sb-muted);
+  font-size: 0.8rem;
+}
+
+.sb-editor {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.sb-editor .cm-editor {
+  height: 100%;
+}
+
+.sb-error {
+  flex: none;
+  padding: 8px 10px;
+  color: var(--sb-danger);
+  background: color-mix(in srgb, var(--sb-danger) 12%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  max-height: 30%;
+  overflow: auto;
+}
+
+@media (max-width: 560px) {
+  .sb-hint {
+    display: none;
+  }
+}

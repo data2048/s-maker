@@ -20,6 +20,7 @@ export function Layout() {
           <NavLink to="/" end>
             Home
           </NavLink>
+          <NavLink to="/playground">Playground</NavLink>
           {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         <div className="spacer" />
@@ -33,6 +34,16 @@ export function Layout() {
       <main className="page">
         <Outlet />
       </main>
+      <footer className="footer">
+        s-maker is free software (AGPL-3.0) ·{' '}
+        <a href="https://github.com/data2048/s-maker" target="_blank" rel="noreferrer">
+          source code
+        </a>{' '}
+        · music engine:{' '}
+        <a href="https://strudel.cc" target="_blank" rel="noreferrer">
+          Strudel
+        </a>
+      </footer>
     </div>
   );
 }

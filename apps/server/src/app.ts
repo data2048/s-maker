@@ -9,6 +9,7 @@ import type { Db } from './db';
 import authPlugin from './auth/plugin';
 import { authRoutes } from './auth/routes';
 import { healthRoutes } from './routes/health';
+import { applySandboxHeaders, SANDBOX_PATH } from './sandbox-headers';
 
 export interface AppDeps {
   config: Config;
@@ -85,9 +86,21 @@ export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance
       root: webDist,
       wildcard: false,
       setHeaders(res, path) {
-        // Vite puts content-hashed files in /assets, so they can be cached forever.
-        const immutable = path.replaceAll('\\', '/').includes('/assets/');
-        res.header('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-cache');
+        const p = path.replaceAll('\\', '/');
+        if (p.endsWith(SANDBOX_PATH)) {
+          applySandboxHeaders(res);
+          return;
+        }
+        if (p.includes('/assets/')) {
+          // Vite puts content-hashed files in /assets, so they can be cached forever.
+          res.header('Cache-Control', 'public, max-age=31536000, immutable');
+          // The sandboxed player has an opaque origin ("null") and loads its modules with CORS.
+          // These are public static files, so allowing any origin exposes nothing.
+          res.header('Access-Control-Allow-Origin', '*');
+          res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+        } else {
+          res.header('Cache-Control', 'no-cache');
+        }
       },
     });
   }
