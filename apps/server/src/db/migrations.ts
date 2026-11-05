@@ -108,4 +108,24 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    id: 4,
+    name: 'midi uploads',
+    // The file itself is stored in the database: no file paths built from user input, and the
+    // uploads are part of the regular volume backup.
+    sql: `
+      CREATE TABLE midi_uploads (
+        id INTEGER PRIMARY KEY,
+        owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        data BLOB NOT NULL,
+        analysis TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX midi_uploads_owner ON midi_uploads(owner_id, created_at);
+      ALTER TABLE songs ADD COLUMN midi_upload_id INTEGER REFERENCES midi_uploads(id) ON DELETE SET NULL;
+    `,
+  },
 ];

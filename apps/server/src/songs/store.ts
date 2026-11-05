@@ -20,6 +20,7 @@ export interface SongRow {
   visibility: Visibility;
   forked_from_song_id: number | null;
   forked_from_version_id: number | null;
+  midi_upload_id: number | null;
   current_version_id: number;
   created_at: number;
   updated_at: number;
@@ -143,6 +144,7 @@ export const songs = {
       message?: string;
       forkedFromSongId?: number;
       forkedFromVersionId?: number;
+      midiUploadId?: number;
     },
   ): SongRow {
     return transaction(db, () => {
@@ -150,8 +152,8 @@ export const songs = {
       const r = db
         .prepare(
           `INSERT INTO songs (owner_id, title, visibility, forked_from_song_id, forked_from_version_id,
-                              current_version_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+                              midi_upload_id, current_version_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         )
         .run(
           s.ownerId,
@@ -159,6 +161,7 @@ export const songs = {
           s.visibility,
           s.forkedFromSongId ?? null,
           s.forkedFromVersionId ?? null,
+          s.midiUploadId ?? null,
           now,
           now,
         );

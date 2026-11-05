@@ -85,7 +85,7 @@ Przeglądarka:
 | Frontend  | React + Vite + React Router + TanStack Query                             | najlepiej znany modelom i w dokumentacji                |
 | Edytor    | CodeMirror (`@strudel/codemirror`)                                       | natywne podświetlanie Strudela                          |
 | Audio     | `@strudel/web` / `@strudel/repl` + soundfonty GM                         | oficjalne pakiety                                       |
-| MIDI      | `@tonejs/midi`                                                           | parsowanie i zapis MIDI                                 |
+| MIDI      | własny parser i zapis SMF (`packages/shared/src/midi`)                   | pełna kontrola limitów dla niezaufanych plików          |
 | Testy     | Vitest, Playwright (e2e w późniejszych PR)                               |                                                         |
 | Hasła     | argon2id                                                                 | rekomendacja OWASP                                      |
 | Markdown  | `marked` + DOMPurify                                                     | bezpieczne renderowanie wall, czatu i objaśnień         |
@@ -245,12 +245,13 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 
 #### PR 4: Import MIDI, część 1 (faithful)
 
-- Upload `.mid`: limit rozmiaru (np. 2 MB), sprawdzenie nagłówka `MThd`, pliki zapisywane pod losową nazwą.
+- Upload `.mid`: limit 2 MB, sprawdzenie nagłówka `MThd`, limity ścieżek i nut. Plik trafia do bazy (BLOB), więc żadna ścieżka na dysku nie powstaje z danych użytkownika, a uploady są w zwykłym backupie wolumenu. Każdy widzi tylko swoje pliki (50 ostatnich).
 - Parsowanie i analiza: tempo, metrum, tonacja, instrumenty, zakres, liczba nut.
 - Widok ścieżek z MIDI: wybór, które importować.
 - Pełna mapa GM 128 programów → `gm_*`, mapa perkusji GM → sample.
 - Konwersja w trybie faithful z wyborem siatki kwantyzacji.
 - Fixtures i testy round-trip.
+- (Zrobione w PR 4.) Kod: 1 cykl = 1 takt, `setcpm(bpm/ćwierćnut_w_takcie)`, jedna pozycja `<...>` na takt, powtórzone takty jako `!n`, nakładające się nuty rozdzielone na głosy (`,` albo `stack(...)` gdy głosy mają własną dynamikę), perkusja jako `s("bd sd hh")` na `.bank("RolandTR909")`. Podgląd na żywo w odtwarzaczu przed utworzeniem utworu. Testy round-trip uruchamiają wygenerowany kod w samym Strudelu (Node) i porównują nuty z plikiem.
 - **Test:** wrzucasz własne MIDI, widzisz ścieżki z instrumentami i słyszysz je w Strudel.
 
 #### PR 5: Import MIDI, część 2 (essence, klasyfikacja, brief)
@@ -337,7 +338,7 @@ Duże PR-y (4, 6, 7) mogą zostać podzielone na mniejsze w trakcie pracy.
 
 Dodatkowo:
 
-- upload MIDI: limit rozmiaru, sprawdzenie formatu, losowe nazwy plików;
+- upload MIDI: limit rozmiaru i liczby nut, sprawdzenie formatu, plik w bazie (bez ścieżek z danych użytkownika), rate limit 20/min;
 - WebSocket: autoryzacja sesją, sprawdzanie `Origin`, limit wiadomości.
 
 ---

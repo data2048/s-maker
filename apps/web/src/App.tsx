@@ -3,6 +3,7 @@ import { AuthProvider, RequireAuth } from './auth';
 import { Layout } from './components/Layout';
 import { AdminPage } from './pages/AdminPage';
 import { HomePage } from './pages/HomePage';
+import { ImportPage } from './pages/ImportPage';
 import { InvitePage } from './pages/InvitePage';
 import { LoginPage } from './pages/LoginPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
@@ -25,6 +26,7 @@ export function App() {
           >
             <Route index element={<HomePage />} />
             <Route path="songs/:id" element={<SongPage />} />
+            <Route path="import" element={<ImportPage />} />
             <Route path="playground" element={<PlaygroundPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route

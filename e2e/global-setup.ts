@@ -1,14 +1,17 @@
 // Starts the built server on its own port with an empty database and captures the admin setup link.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const STATE_FILE = join(tmpdir(), 's-maker-e2e-state.json');
+/** Session cookie of the first login, reused by later tests. */
+export const SESSION_FILE = join(tmpdir(), 's-maker-e2e-session.json');
 const PORT = 44577;
 
 export default async function globalSetup(): Promise<void> {
+  rmSync(SESSION_FILE, { force: true });
   const dataDir = mkdtempSync(join(tmpdir(), 's-maker-e2e-'));
   const child = spawn(
     process.execPath,
