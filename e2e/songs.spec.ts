@@ -63,9 +63,15 @@ test('unsaved edits survive leaving the page', async ({ page }) => {
   await newSong(page);
   await page.getByRole('button', { name: 'Solo drums' }).click();
   await expect(playerFrame(page).locator('.cm-content')).toContainText('Sdrums:');
-  await page.waitForTimeout(800); // draft is written after a short pause
+  const songUrl = page.url();
+  // The draft is written after a short pause.
+  await expect
+    .poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('smaker.draft.'))))
+    .toBe(true);
   await page.getByRole('link', { name: 'Home' }).click();
-  await page.goBack();
+  await expect(page.getByRole('heading', { name: /Hi,/ })).toBeVisible();
+  // Full reload of the song page (history.back() is unreliable with the player iframe).
+  await page.goto(songUrl);
   await playerReady(page);
   await page.getByRole('button', { name: 'Restore them' }).click();
   await expect(playerFrame(page).locator('.cm-content')).toContainText('Sdrums:');
