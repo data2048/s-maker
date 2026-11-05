@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: install everything, build web + server ----
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -12,7 +12,7 @@ COPY . .
 RUN npm run build
 
 # ---- deps: production dependencies of the server only ----
-FROM node:24-slim AS deps
+FROM node:26-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -22,7 +22,7 @@ RUN npm ci --omit=dev --workspace apps/server --include-workspace-root=false --n
   && rm -rf node_modules/@s-maker
 
 # ---- runtime ----
-FROM node:24-slim
+FROM node:26-slim
 ARG APP_VERSION=dev
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
