@@ -1,0 +1,4 @@
+// Code shared by the server and the web app: types, validation schemas, music logic.
+export const APP_NAME = 's-maker';
+
+export * from './health';
