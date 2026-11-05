@@ -1,5 +1,7 @@
 import { join, resolve } from 'node:path';
 import { buildApp } from './app';
+import { bootstrapAdmin } from './auth/bootstrap';
+import { loginFailures, sessions } from './auth/store';
 import { loadConfig } from './config';
 import { openDatabase } from './db';
 
@@ -11,6 +13,15 @@ async function main(): Promise<void> {
   }
   const db = openDatabase(join(config.dataDir, 'smaker.db'));
   const app = await buildApp({ config, db });
+  bootstrapAdmin(db, config, app.log);
+
+  // Housekeeping: drop expired sessions and old login failures every hour.
+  const cleanup = () => {
+    sessions.deleteExpired(db);
+    loginFailures.deleteOld(db);
+  };
+  cleanup();
+  setInterval(cleanup, 3600 * 1000).unref();
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
