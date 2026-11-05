@@ -94,3 +94,42 @@ test('edits in the player flow back to the app and get validated', async ({ page
   await page.keyboard.type('\nfetch("x")');
   await expect(page.locator('.issues li.warning')).toContainText('"fetch" is not available');
 });
+
+test('playing notes are highlighted in the editor', async ({ page }) => {
+  await login(page);
+  await page.goto('/playground');
+  await playerReady(page);
+  const player = page.frameLocator('iframe[title="Strudel player"]');
+  await expect(player.locator('.cm-lineNumbers')).toBeVisible();
+
+  await player.getByRole('button', { name: 'Play' }).click();
+  await expect(page.getByText('● playing')).toBeVisible({ timeout: 30_000 });
+  // Strudel marks the mini-notation of the active events with an outline.
+  await expect(player.locator('.cm-content [style*="outline"]').first()).toBeVisible({ timeout: 10_000 });
+  await page.screenshot({ path: 'test-results/playground-highlight.png' });
+  await player.getByRole('button', { name: 'Stop' }).click();
+});
+
+test('font size can be changed and is remembered', async ({ page }) => {
+  await login(page);
+  await page.goto('/playground');
+  await playerReady(page);
+  const player = page.frameLocator('iframe[title="Strudel player"]');
+  const size = () => player.locator('#editor').evaluate((el) => getComputedStyle(el).fontSize);
+
+  expect(await size()).toBe('15px');
+  await player.getByRole('button', { name: 'Bigger font' }).click();
+  await player.getByRole('button', { name: 'Bigger font' }).click();
+  await player.getByRole('button', { name: 'Bigger font' }).click();
+  expect(await size()).toBe('18px');
+  await player.getByRole('button', { name: 'Wrap long lines' }).click();
+
+  await page.reload();
+  await playerReady(page);
+  await expect(player.locator('#font-size')).toHaveText('18');
+  expect(await size()).toBe('18px');
+  await expect(player.getByRole('button', { name: 'Wrap long lines' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+});

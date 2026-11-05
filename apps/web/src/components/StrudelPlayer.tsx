@@ -1,5 +1,24 @@
-import { fromSandboxSchema, SANDBOX_PATH, type ToSandbox } from '@s-maker/shared';
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  editorSettingsSchema,
+  fromSandboxSchema,
+  SANDBOX_PATH,
+  type EditorSettings,
+  type ToSandbox,
+} from '@s-maker/shared';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+
+const SETTINGS_KEY = 'smaker.editor.settings';
+
+/** Editor preferences live in the app's localStorage; the sandboxed player cannot store anything. */
+function loadSettings(): EditorSettings {
+  try {
+    const parsed = editorSettingsSchema.safeParse(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null'));
+    return parsed.success ? parsed.data : DEFAULT_EDITOR_SETTINGS;
+  } catch {
+    return DEFAULT_EDITOR_SETTINGS;
+  }
+}
 
 export interface PlayerState {
   ready: boolean;
@@ -60,10 +79,13 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
       if (!parsed.success) return;
       const msg = parsed.data;
       if (msg.type === 'ready') {
+        post({ type: 'settings', settings: loadSettings() });
         setReady(true);
         callbacks.current.onStateChange?.({ ready: true, started: false, pending: false, error: null });
       } else if (msg.type === 'state') {
         callbacks.current.onStateChange?.({ ready: true, ...msg });
+      } else if (msg.type === 'settings') {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(msg.settings));
       } else if (msg.type === 'code') {
         lastSent.current = msg.code;
         callbacks.current.onCodeChange?.(msg.code);

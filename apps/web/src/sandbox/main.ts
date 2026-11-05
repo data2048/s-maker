@@ -2,8 +2,17 @@
 // no cookies, no access to the app page or the API. It talks to the app only via postMessage.
 import './storage-shim';
 import './sandbox.css';
-import { fromSandboxSchema, toSandboxSchema, type FromSandbox } from '@s-maker/shared';
-import { StrudelMirror } from '@strudel/codemirror';
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  EDITOR_FONT_MAX,
+  EDITOR_FONT_MIN,
+  editorSettingsSchema,
+  fromSandboxSchema,
+  toSandboxSchema,
+  type EditorSettings,
+  type FromSandbox,
+} from '@s-maker/shared';
+import { codemirrorSettings, StrudelMirror } from '@strudel/codemirror';
 import { getDrawContext } from '@strudel/draw';
 import { transpiler } from '@strudel/transpiler';
 import { getAudioContext, initAudioOnFirstClick, webaudioOutput } from '@strudel/webaudio';
@@ -21,6 +30,10 @@ const playBtn = $<HTMLButtonElement>('play');
 const stopBtn = $<HTMLButtonElement>('stop');
 const statusEl = $('status');
 const errorEl = $('error');
+const smallerBtn = $<HTMLButtonElement>('font-smaller');
+const biggerBtn = $<HTMLButtonElement>('font-bigger');
+const fontSizeEl = $('font-size');
+const wrapBtn = $<HTMLButtonElement>('wrap');
 
 const embedded = window.parent !== window;
 function send(msg: FromSandbox): void {
@@ -76,7 +89,40 @@ const editor = new StrudelMirror({
   },
 });
 
-editor.updateSettings({ fontSize: 15, fontFamily: "ui-monospace, 'Cascadia Code', Menlo, monospace" });
+// ---------- editor preferences ----------
+
+let settings: EditorSettings = { ...DEFAULT_EDITOR_SETTINGS };
+
+function applySettings(next: EditorSettings): void {
+  settings = next;
+  // updateSettings() reconfigures every editor extension from the object it gets, so always pass the
+  // full settings (otherwise pattern highlighting, line numbers etc. get switched off).
+  editor.updateSettings({
+    ...codemirrorSettings.get(),
+    isPatternHighlightingEnabled: true,
+    isFlashEnabled: true,
+    isLineNumbersDisplayed: true,
+    fontFamily: "ui-monospace, 'Cascadia Code', Menlo, monospace",
+    fontSize: settings.fontSize,
+    isLineWrappingEnabled: settings.lineWrap,
+  });
+  fontSizeEl.textContent = String(settings.fontSize);
+  smallerBtn.disabled = settings.fontSize <= EDITOR_FONT_MIN;
+  biggerBtn.disabled = settings.fontSize >= EDITOR_FONT_MAX;
+  wrapBtn.setAttribute('aria-pressed', String(settings.lineWrap));
+}
+
+function changeSettings(patch: Partial<EditorSettings>): void {
+  const next = editorSettingsSchema.parse({ ...settings, ...patch });
+  applySettings(next);
+  send({ type: 'settings', settings: next });
+}
+
+smallerBtn.addEventListener('click', () => changeSettings({ fontSize: settings.fontSize - 1 }));
+biggerBtn.addEventListener('click', () => changeSettings({ fontSize: settings.fontSize + 1 }));
+wrapBtn.addEventListener('click', () => changeSettings({ lineWrap: !settings.lineWrap }));
+
+applySettings(settings);
 
 function renderState(started: boolean, pending: boolean, error: string | null): void {
   playBtn.textContent = started ? 'Update' : 'Play';
@@ -106,6 +152,9 @@ window.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'stop':
       void editor.stop();
+      break;
+    case 'settings':
+      applySettings(msg.settings);
       break;
   }
 });

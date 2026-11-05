@@ -5,11 +5,23 @@ import { MAX_CODE_LENGTH } from './validate';
 
 const code = z.string().max(MAX_CODE_LENGTH);
 
+export const EDITOR_FONT_MIN = 10;
+export const EDITOR_FONT_MAX = 32;
+
+/** Editor preferences. Stored by the app (the sandbox has no persistent storage). */
+export const editorSettingsSchema = z.object({
+  fontSize: z.number().int().min(EDITOR_FONT_MIN).max(EDITOR_FONT_MAX),
+  lineWrap: z.boolean(),
+});
+export type EditorSettings = z.infer<typeof editorSettingsSchema>;
+export const DEFAULT_EDITOR_SETTINGS: EditorSettings = { fontSize: 15, lineWrap: false };
+
 /** App → sandbox */
 export const toSandboxSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('setCode'), code, readOnly: z.boolean().optional() }),
+  z.object({ type: z.literal('setCode'), code }),
   z.object({ type: z.literal('play') }),
   z.object({ type: z.literal('stop') }),
+  z.object({ type: z.literal('settings'), settings: editorSettingsSchema }),
 ]);
 export type ToSandbox = z.infer<typeof toSandboxSchema>;
 
@@ -23,6 +35,8 @@ export const fromSandboxSchema = z.discriminatedUnion('type', [
     pending: z.boolean(),
     error: z.string().max(2000).nullable(),
   }),
+  /** The user changed a preference in the player toolbar; the app saves it. */
+  z.object({ type: z.literal('settings'), settings: editorSettingsSchema }),
 ]);
 export type FromSandbox = z.infer<typeof fromSandboxSchema>;
 

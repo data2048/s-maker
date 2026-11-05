@@ -103,3 +103,26 @@ body {
     display: none;
   }
 }
+
+.sb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sb-btn.icon {
+  padding: 4px 9px;
+  min-width: 34px;
+}
+
+.sb-btn[aria-pressed='true'] {
+  border-color: var(--sb-accent);
+  color: var(--sb-accent);
+}
+
+.sb-font-size {
+  min-width: 2ch;
+  text-align: center;
+  color: var(--sb-muted);
+  font-variant-numeric: tabular-nums;
+}

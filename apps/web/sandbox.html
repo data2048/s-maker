@@ -12,6 +12,30 @@
       <span id="status" class="sb-status"></span>
       <span class="sb-spacer"></span>
       <span class="sb-hint">Ctrl+Enter play/update · Ctrl+. stop</span>
+      <span class="sb-group" role="group" aria-label="Font size">
+        <button
+          type="button"
+          id="font-smaller"
+          class="sb-btn icon"
+          title="Smaller font"
+          aria-label="Smaller font"
+        >
+          A−
+        </button>
+        <span id="font-size" class="sb-font-size" aria-live="polite">15</span>
+        <button
+          type="button"
+          id="font-bigger"
+          class="sb-btn icon"
+          title="Bigger font"
+          aria-label="Bigger font"
+        >
+          A+
+        </button>
+      </span>
+      <button type="button" id="wrap" class="sb-btn icon" title="Wrap long lines" aria-label="Wrap long lines" aria-pressed="false">
+        Wrap
+      </button>
     </div>
     <div id="editor" class="sb-editor"></div>
     <div id="error" class="sb-error" hidden></div>
