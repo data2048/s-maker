@@ -11,7 +11,7 @@ export const EXAMPLES: Example[] = [
 setcpm(90/4)
 
 $: note("<[c3,e3,g3] [a2,c3,e3] [f2,a2,c3] [g2,b2,d3]>")
-  .s("gm_acoustic_grand_piano").legato(1).gain(.6)
+  .s("gm_piano").legato(1).gain(.6)
 
 $: note("<c2 a1 f1 g1>").s("gm_acoustic_bass").legato(.9)
 

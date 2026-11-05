@@ -8,6 +8,7 @@ import type { Config } from './config';
 import type { Db } from './db';
 import authPlugin from './auth/plugin';
 import { authRoutes } from './auth/routes';
+import { songRoutes } from './songs/routes';
 import { healthRoutes } from './routes/health';
 import { applySandboxHeaders, SANDBOX_PATH } from './sandbox-headers';
 
@@ -79,6 +80,7 @@ export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance
   await app.register(healthRoutes);
   await app.register(authPlugin);
   await app.register(authRoutes);
+  await app.register(songRoutes);
 
   const webDist = config.webDist;
   if (webDist && existsSync(join(webDist, 'index.html'))) {

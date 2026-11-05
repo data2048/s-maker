@@ -1,30 +1,5 @@
-import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
-import { STATE_FILE } from './global-setup';
-
-const password = `e2e-${randomBytes(12).toString('base64url')}`;
-let adminCreated = false;
-
-async function login(page: Page): Promise<void> {
-  if (!adminCreated) {
-    const { link } = JSON.parse(readFileSync(STATE_FILE, 'utf8')) as { link: string };
-    await page.goto(new URL(link).pathname);
-    await page.getByLabel('Password', { exact: true }).fill(password);
-    await page.getByLabel('Repeat password').fill(password);
-    await page.getByRole('button', { name: 'Create account' }).click();
-    adminCreated = true;
-  } else {
-    await page.goto('/login');
-    await page.getByLabel('Username').fill('e2e-admin');
-    await page.getByLabel('Password').fill(password);
-    await page.getByRole('button', { name: 'Log in' }).click();
-  }
-  await expect(page.getByRole('heading', { name: /Hi,/ })).toBeVisible();
-}
-
-const playerReady = (page: Page) =>
-  expect(page.getByText('stopped', { exact: true })).toBeVisible({ timeout: 20_000 });
+import { expect, test } from '@playwright/test';
+import { login, playerReady } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -34,7 +9,7 @@ test('playground loads the sandboxed player and plays', async ({ page }) => {
   await playerReady(page);
 
   const player = page.frameLocator('iframe[title="Strudel player"]');
-  await expect(player.locator('.cm-content')).toContainText('gm_acoustic_grand_piano');
+  await expect(player.locator('.cm-content')).toContainText('gm_piano');
 
   await player.getByRole('button', { name: 'Play' }).click();
   await expect(page.getByText('● playing')).toBeVisible({ timeout: 30_000 });

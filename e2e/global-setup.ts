@@ -1,5 +1,6 @@
 // Starts the built server on its own port with an empty database and captures the admin setup link.
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,5 +50,15 @@ export default async function globalSetup(): Promise<void> {
     if (ok) break;
     await new Promise((r) => setTimeout(r, 200));
   }
-  writeFileSync(STATE_FILE, JSON.stringify({ pid: child.pid, link, dataDir }));
+  // Create the admin account through the real invite flow.
+  const password = `e2e-${randomBytes(12).toString('base64url')}`;
+  const token = link.split('/invite/')[1]!;
+  const res = await fetch(`http://127.0.0.1:${PORT}/api/invites/${token}/accept`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${PORT}` },
+    body: JSON.stringify({ username: 'e2e-admin', displayName: 'E2E Admin', password }),
+  });
+  if (!res.ok) throw new Error(`admin setup failed: ${res.status} ${await res.text()}`);
+
+  writeFileSync(STATE_FILE, JSON.stringify({ pid: child.pid, dataDir, username: 'e2e-admin', password }));
 }

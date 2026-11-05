@@ -7,6 +7,7 @@ import { InvitePage } from './pages/InvitePage';
 import { LoginPage } from './pages/LoginPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { SongPage } from './pages/SongPage';
 
 export function App() {
   return (
@@ -23,6 +24,7 @@ export function App() {
             }
           >
             <Route index element={<HomePage />} />
+            <Route path="songs/:id" element={<SongPage />} />
             <Route path="playground" element={<PlaygroundPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route
