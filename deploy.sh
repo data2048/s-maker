@@ -107,7 +107,8 @@ main() {
   done)"
   if [[ -n "$new_vars" ]]; then
     warn "these settings exist in .env.example but not in your .env (defaults will be used):"
-    sed 's/^/           /' <<<"$new_vars" >&2
+    while read -r k; do printf '           %s
+' "$k" >&2; done <<<"$new_vars"
   fi
   ((${#missing[@]} == 0)) || die "missing values in $ENV_FILE: ${missing[*]}"
   if grep -qE '^[A-Z0-9_]+=["'"'"']' "$ENV_FILE"; then
