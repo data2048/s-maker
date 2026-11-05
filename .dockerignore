@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/coverage
+.git
+.github
+.env
+.env.*
+!.env.example
+data
+*.db
+*.db-wal
+*.db-shm
+*.log
+docs

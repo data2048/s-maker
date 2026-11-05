@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Shellcheck deploy.sh
+        run: shellcheck deploy.sh
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build --build-arg APP_VERSION=${{ github.sha }} -t s-maker:ci .
+      - name: Smoke test container
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:44566:44566 \
+            -e PUBLIC_URL=http://localhost:44566 -e ADMIN_USERNAME=admin \
+            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+            s-maker:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:44566/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs smoke
+          exit 1
