@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>s-maker player</title>
+  </head>
+  <body>
+    <div class="sb-toolbar">
+      <button
+        type="button"
+        id="play"
+        class="sb-btn primary"
+        title="Play: Ctrl+Enter · Update while playing: Alt+Enter"
+        disabled
+      >
+        Loading…
+      </button>
+      <button type="button" id="stop" class="sb-btn" disabled>Stop</button>
+      <span id="status" class="sb-status"></span>
+      <span class="sb-spacer"></span>
+      <span class="sb-hint">Ctrl+Enter play/stop · Alt+Enter update</span>
+      <span class="sb-group" role="group" aria-label="Font size">
+        <button
+          type="button"
+          id="font-smaller"
+          class="sb-btn icon"
+          title="Smaller font"
+          aria-label="Smaller font"
+        >
+          A−
+        </button>
+        <span id="font-size" class="sb-font-size" aria-live="polite">15</span>
+        <button
+          type="button"
+          id="font-bigger"
+          class="sb-btn icon"
+          title="Bigger font"
+          aria-label="Bigger font"
+        >
+          A+
+        </button>
+      </span>
+      <button
+        type="button"
+        id="wrap"
+        class="sb-btn icon"
+        title="Wrap long lines"
+        aria-label="Wrap long lines"
+        aria-pressed="false"
+      >
+        Wrap
+      </button>
+    </div>
+    <div id="editor" class="sb-editor"></div>
+    <div id="error" class="sb-error" hidden></div>
+    <script type="module" src="/src/sandbox/main.ts"></script>
+  </body>
+</html>

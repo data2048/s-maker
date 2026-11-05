@@ -396,3 +396,57 @@ code,
     max-width: 90px;
   }
 }
+
+/* ---------- playground / player ---------- */
+
+.playground {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.playground-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.playground-head h1 {
+  margin: 0;
+}
+
+.strudel-frame {
+  width: 100%;
+  height: min(62vh, 640px);
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  display: block;
+}
+
+.issues {
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+}
+
+.issues li.error {
+  color: var(--danger);
+}
+
+.issues li.warning {
+  color: #ffcf70;
+}
+
+.footer {
+  padding: 16px 20px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}

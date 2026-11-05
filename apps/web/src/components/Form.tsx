@@ -1,16 +1,24 @@
-import type { InputHTMLAttributes, ReactNode } from 'react';
+import { useId, type InputHTMLAttributes, type ReactNode } from 'react';
 
 export function Field({
   label,
   hint,
   ...input
 }: { label: string; hint?: ReactNode } & InputHTMLAttributes<HTMLInputElement>) {
+  const id = useId();
+  const hintId = `${id}-hint`;
   return (
-    <label className="field">
-      <span className="field-label">{label}</span>
-      <input className="input" {...input} />
-      {hint && <span className="field-hint">{hint}</span>}
-    </label>
+    <div className="field">
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      <input id={id} className="input" aria-describedby={hint ? hintId : undefined} {...input} />
+      {hint && (
+        <span id={hintId} className="field-hint">
+          {hint}
+        </span>
+      )}
+    </div>
   );
 }
 

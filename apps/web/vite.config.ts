@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -8,6 +9,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // The sandboxed player iframe has an opaque origin ("null"); it must be allowed to load modules.
+    cors: { origin: [/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/, 'null'] },
     proxy: {
       '/api': apiTarget,
       '/health': apiTarget,
@@ -18,5 +21,13 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    // Strudel is large; that is expected for the player bundle.
+    chunkSizeWarningLimit: 4000,
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        sandbox: resolve(import.meta.dirname, 'sandbox.html'),
+      },
+    },
   },
 });

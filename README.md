@@ -16,13 +16,14 @@ npm run dev        # server on :44566, web on http://localhost:5173 (proxies /ap
 
 Useful scripts:
 
-| Command                           | What it does                                  |
-| --------------------------------- | --------------------------------------------- |
-| `npm test`                        | unit and API tests (Vitest)                   |
-| `npm run typecheck`               | TypeScript checks for all packages            |
-| `npm run lint` / `npm run format` | ESLint / Prettier                             |
-| `npm run build`                   | production build of web + server              |
-| `npm start`                       | run the built server (serves the web app too) |
+| Command                           | What it does                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `npm test`                        | unit and API tests (Vitest)                                                                 |
+| `npm run test:e2e`                | browser tests of the built app (Playwright, uses installed Edge; run `npm run build` first) |
+| `npm run typecheck`               | TypeScript checks for all packages                                                          |
+| `npm run lint` / `npm run format` | ESLint / Prettier                                                                           |
+| `npm run build`                   | production build of web + server                                                            |
+| `npm start`                       | run the built server (serves the web app too)                                               |
 
 Local configuration goes into `.env` in the repo root (see [.env.example](.env.example)).
 
@@ -34,6 +35,11 @@ apps/web        React app
 packages/shared code used by both: types, schemas, music logic
 deploy.sh       one-command deploy to a server with Docker
 ```
+
+## Security of song code
+
+Songs are JavaScript, so they only run in a sandboxed iframe that cannot reach your session or the app.
+See [docs/sandbox.md](docs/sandbox.md).
 
 ## Deploying
 

@@ -5,6 +5,7 @@ import { AdminPage } from './pages/AdminPage';
 import { HomePage } from './pages/HomePage';
 import { InvitePage } from './pages/InvitePage';
 import { LoginPage } from './pages/LoginPage';
+import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ProfilePage } from './pages/ProfilePage';
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
             }
           >
             <Route index element={<HomePage />} />
+            <Route path="playground" element={<PlaygroundPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route
               path="admin"
