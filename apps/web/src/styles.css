@@ -1188,3 +1188,23 @@ label.btn.disabled {
     min-height: 44px;
   }
 }
+
+/* Choosing a model by name, for comparing models. */
+.model-select {
+  max-width: 260px;
+}
+.model-manager {
+  flex-basis: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.model-manager ul {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.model-manager li {
+  overflow-wrap: anywhere;
+}

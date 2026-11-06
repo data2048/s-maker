@@ -12,6 +12,7 @@ import type { Db } from '../db';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const SETTINGS_KEY = 'agent.settings';
+const PICKABLE_MODELS_KEY = 'agent.pickableModels';
 
 export const agentSettings = {
   get(db: Db, config: Config): AgentSettings {
@@ -24,6 +25,21 @@ export const agentSettings = {
       `INSERT INTO app_meta (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     ).run(SETTINGS_KEY, JSON.stringify(settings));
+  },
+};
+
+/** Models the admin can choose by name, for comparing them. */
+export const pickableModels = {
+  get(db: Db): string[] {
+    const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(PICKABLE_MODELS_KEY) as
+      { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as string[]) : [];
+  },
+  set(db: Db, models: string[]): void {
+    db.prepare(
+      `INSERT INTO app_meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(PICKABLE_MODELS_KEY, JSON.stringify(models));
   },
 };
 
@@ -134,6 +150,7 @@ interface ProposalRow {
   instruction: string;
   track: string | null;
   tier: string;
+  requested_model: string | null;
   summary: string;
   base_code: string;
   code: string;
@@ -171,6 +188,7 @@ export const proposals = {
       instruction: string;
       track: string | null;
       tier: string;
+      requestedModel?: string | undefined;
       summary: string;
       baseCode: string;
       code: string;
@@ -182,8 +200,8 @@ export const proposals = {
     const r = db
       .prepare(
         `INSERT INTO agent_proposals (song_id, user_id, base_version_id, status, instruction, track, tier,
-                                      summary, base_code, code, brief, model, cost_usd, created_at)
-         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                      requested_model, summary, base_code, code, brief, model, cost_usd, created_at)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         p.songId,
@@ -192,6 +210,7 @@ export const proposals = {
         p.instruction,
         p.track,
         p.tier,
+        p.requestedModel ?? null,
         p.summary,
         p.baseCode,
         p.code,

@@ -4,7 +4,6 @@ import {
   MAX_BRIEF_ELEMENT_LENGTH,
   MUSIC_ELEMENT_HINTS,
   MUSIC_ELEMENTS,
-  type ModelTier,
   type MusicBrief,
   type SongDto,
 } from '@s-maker/shared';
@@ -12,6 +11,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, errorMessage, streamApi } from '../api';
 import { ErrorBox } from '../components/Form';
+import { ModelSelect, useModelChoice } from '../components/ModelSelect';
 
 function cleanBrief(brief: MusicBrief): MusicBrief {
   return Object.fromEntries(
@@ -25,7 +25,7 @@ export function ComposePage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [brief, setBrief] = useState<MusicBrief>({});
-  const [tier, setTier] = useState<ModelTier>('strong');
+  const model = useModelChoice('strong');
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hasInput = !!description.trim() || !isBriefEmpty(cleanBrief(brief));
@@ -40,7 +40,7 @@ export function ComposePage() {
         {
           description,
           brief: cleanBrief(brief),
-          tier,
+          ...model.request,
           ...(title.trim() ? { title } : {}),
         },
         (event) => {
@@ -128,16 +128,15 @@ export function ComposePage() {
         </div>
       </details>
       <div className="row wrap">
-        <select
-          className="input compact"
-          value={tier}
-          onChange={(e) => setTier(e.target.value as ModelTier)}
-          aria-label="Agent model"
+        <ModelSelect
+          choice={model}
+          label="Agent model"
           disabled={!!status}
-        >
-          <option value="strong">Strong model</option>
-          <option value="fast">Fast model</option>
-        </select>
+          tiers={[
+            { value: 'strong', label: 'Strong model' },
+            { value: 'fast', label: 'Fast model' },
+          ]}
+        />
         <button className="btn primary" onClick={() => void compose()} disabled={!!status || !hasInput}>
           {status ?? 'Compose'}
         </button>

@@ -87,7 +87,11 @@ export function startFakeLlm(): Server {
     req.on('end', () => {
       res.setHeader('Content-Type', 'application/json');
       if (req.url?.endsWith('/models')) {
-        res.end(JSON.stringify({ data: [] }));
+        res.end(
+          JSON.stringify({
+            data: [{ id: 'test/compare-model', pricing: { prompt: '0.000001', completion: '0.000002' } }],
+          }),
+        );
         return;
       }
       const body = JSON.parse(raw) as Body;

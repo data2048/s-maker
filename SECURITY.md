@@ -20,6 +20,8 @@ s-maker is built against the OWASP Top 10. The main rules:
   right file signature and size, notes are validated and the app writes the MIDI file itself. Nothing goes to
   the server.
 - **Access control is enforced on the server** for every resource (owner, visibility, role); deny by default.
+- **Only the admin can choose a model by name,** and only from the admin's own list. The server checks both on
+  every request, so an expensive model cannot be used by changing what the page sends.
 - **The admin can read what is sent to the agent.** To find out why results were poor, the app logs each agent
   run: the request, the code sent, every message to the model and its visible answer, including those from
   private songs. Only the admin can read them, the app says so wherever people use the agent, and each read or

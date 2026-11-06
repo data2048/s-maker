@@ -1,4 +1,6 @@
 // Client for OpenRouter's OpenAI-compatible API. The URL is fixed by configuration, never by user input.
+import type { AgentModelOption } from '@s-maker/shared';
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -37,6 +39,8 @@ export interface LlmClient {
   chat(request: ChatRequest): Promise<ChatResult>;
   /** Model ids that exist right now. */
   listModels(): Promise<string[]>;
+  /** The same models with their prices. */
+  listCatalog?(): Promise<AgentModelOption[]>;
 }
 
 export class LlmError extends Error {
@@ -104,6 +108,12 @@ async function readStream(
   handle(buffer);
   out.choices = [{ message: { content }, finish_reason: finishReason }];
   return out;
+}
+
+/** OpenRouter gives prices per token, as text. */
+function perMillion(price: string | undefined): number | null {
+  const n = Number(price);
+  return price !== undefined && Number.isFinite(n) && n >= 0 ? Math.round(n * 1e9) / 1000 : null;
 }
 
 const TIMEOUT_MS = 150_000;
@@ -234,6 +244,19 @@ export function createOpenRouterClient(opts: {
       if (!res.ok) throw new LlmError(`Could not list models (${res.status})`, true);
       const data = (await res.json()) as { data?: { id: string }[] };
       return (data.data ?? []).map((m) => m.id);
+    },
+
+    async listCatalog() {
+      const res = await doFetch(`${opts.baseUrl}/models`, { headers: headers() });
+      if (!res.ok) throw new LlmError(`Could not list models (${res.status})`, true);
+      const data = (await res.json()) as {
+        data?: { id: string; pricing?: { prompt?: string; completion?: string } }[];
+      };
+      return (data.data ?? []).map((m) => ({
+        id: m.id,
+        promptUsdPerM: perMillion(m.pricing?.prompt),
+        completionUsdPerM: perMillion(m.pricing?.completion),
+      }));
     },
   };
 }

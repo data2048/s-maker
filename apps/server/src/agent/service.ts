@@ -37,6 +37,8 @@ export interface RunInfo {
   request: string;
   /** Set when this run works on a proposal that already exists. */
   proposalId?: number;
+  /** A model chosen by name, already checked by the route. */
+  model?: string | undefined;
 }
 
 function startRun(
@@ -49,7 +51,7 @@ function startRun(
       songId: ctx.songId,
       proposalId: input.proposalId ?? null,
       purpose: ctx.purpose,
-      tier: input.tier,
+      tier: input.model ? 'picked' : input.tier,
       request: input.request,
       inputCode: input.inputCode,
     }),
@@ -99,11 +101,16 @@ export function assertWithinLimits(app: FastifyInstance, userId: number, setting
     throw new HttpError(429, 'The group reached its weekly agent limit. Ask the admin or try again later.');
 }
 
-/** Models to try, in order. */
-export function modelOrder(settings: AgentSettings, tier: ModelTier): string[] {
+/** Models to try, in order. A chosen model has no fallback: its result must really come from it. */
+export function modelOrder(settings: AgentSettings, tier: ModelTier, chosen?: string): string[] {
+  if (chosen) return [chosen];
   const first = tier === 'strong' ? settings.modelStrong : settings.modelFast;
   return [...new Set([first, settings.modelFallback].filter(Boolean))];
 }
+
+/** A chosen model gets the larger limit, so that models are compared under the same conditions. */
+const maxTokensFor = (tier: ModelTier, chosen?: string): number =>
+  chosen ? MAX_TOKENS.strong : MAX_TOKENS[tier];
 
 /** One call to a model: logged with its cost whatever happens next. */
 export async function callModel(
@@ -231,6 +238,7 @@ async function textLoop(
   input: {
     messages: ChatMessage[];
     tier: ModelTier;
+    model?: string | undefined;
     onText?(textSoFar: string): void;
     signal?: AbortSignal;
   },
@@ -238,11 +246,11 @@ async function textLoop(
   const settings = agentSettings.get(ctx.app.db, ctx.app.config);
   let costUsd = 0;
   let lastProblem = 'The model did not give a usable answer';
-  for (const model of modelOrder(settings, input.tier)) {
+  for (const model of modelOrder(settings, input.tier, input.model)) {
     assertWithinLimits(ctx.app, ctx.userId, settings);
     try {
       const r = await callModel(ctx, model, input.messages, {
-        maxTokens: MAX_TOKENS[input.tier],
+        maxTokens: maxTokensFor(input.tier, input.model),
         ...(input.onText ? { onText: input.onText } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });
@@ -287,6 +295,7 @@ async function agentLoop(
     messages: ChatMessage[];
     baseCode: string;
     tier: ModelTier;
+    model?: string | undefined;
     onText?(textSoFar: string): void;
     signal?: AbortSignal;
   },
@@ -296,7 +305,7 @@ async function agentLoop(
   let costUsd = 0;
   let lastProblem = 'The model did not give a usable answer';
 
-  for (const model of modelOrder(settings, input.tier)) {
+  for (const model of modelOrder(settings, input.tier, input.model)) {
     const messages = [...input.messages];
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       assertWithinLimits(ctx.app, ctx.userId, settings);
@@ -305,7 +314,7 @@ async function agentLoop(
       let attemptId: number | null;
       try {
         const r = await callModel(ctx, model, messages, {
-          maxTokens: MAX_TOKENS[input.tier],
+          maxTokens: maxTokensFor(input.tier, input.model),
           json: true,
           ...(input.onText ? { onText: input.onText } : {}),
           ...(input.signal ? { signal: input.signal } : {}),

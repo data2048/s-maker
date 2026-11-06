@@ -1,12 +1,7 @@
-import {
-  AGENT_PRIVACY_NOTE,
-  diffLines,
-  type AgentProposalDto,
-  type AgentUsageDto,
-  type ModelTier,
-} from '@s-maker/shared';
+import { AGENT_PRIVACY_NOTE, diffLines, type AgentProposalDto, type AgentUsageDto } from '@s-maker/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
+import { ModelSelect, useModelChoice } from './ModelSelect';
 import type { AgentProposalState } from './useAgentProposal';
 
 interface Props {
@@ -31,7 +26,8 @@ export function AgentPanel(props: Props) {
   const { proposal, busy, error, spent } = agent;
   const [usage, setUsage] = useState<AgentUsageDto | null>(null);
   const [instruction, setInstruction] = useState('');
-  const [tier, setTier] = useState<ModelTier>('fast');
+  const [lastInstruction, setLastInstruction] = useState('');
+  const model = useModelChoice('fast');
 
   const loadUsage = useCallback(() => {
     api<AgentUsageDto>('GET', '/api/agent/usage')
@@ -52,11 +48,12 @@ export function AgentPanel(props: Props) {
     try {
       const first = await api<AgentProposalDto>('POST', `/api/songs/${songId}/agent/proposals`, {
         instruction,
-        tier,
+        ...model.request,
         code,
         baseVersionId,
         ...scope,
       });
+      setLastInstruction(instruction);
       setInstruction('');
       await agent.present(first);
     } catch (e) {
@@ -113,16 +110,21 @@ export function AgentPanel(props: Props) {
           aria-label="Instruction for the agent"
           disabled={!!busy}
         />
-        <select
-          className="input compact"
-          value={tier}
-          onChange={(e) => setTier(e.target.value as ModelTier)}
-          aria-label="Agent model"
+        {lastInstruction && !instruction && !proposal && !busy && (
+          <button
+            type="button"
+            className="btn small"
+            title="Write the same request again, for example to try it on another model"
+            onClick={() => setInstruction(lastInstruction)}
+          >
+            Reuse last request
+          </button>
+        )}
+        <ModelSelect
+          choice={model}
+          label="Agent model"
           title="Strong costs more; use it for bigger changes"
-        >
-          <option value="fast">Fast</option>
-          <option value="strong">Strong</option>
-        </select>
+        />
         <button className="btn primary" disabled={!!busy || !instruction.trim() || overLimit}>
           {busy ?? 'Ask agent'}
         </button>

@@ -203,7 +203,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
 Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./deploy.sh <branch>`) → merge do `main`.
 
-**Stan (2026-11-06):** PR 0–8 i PR 12 scalone do `main`. W toku: PR 13 (logi agenta). PR 9–11 są odłożone na prośbę użytkownika: najpierw trzeba poprawić wyniki agenta. Zaległości są na końcu tej sekcji.
+**Stan (2026-11-06):** PR 0–8 i PR 12 scalone do `main`. PR 13 (logi agenta) scalony. W toku: PR 14 (wybór modelu w oknie utworu). PR 9–11 są odłożone na prośbę użytkownika: najpierw trzeba poprawić wyniki agenta. Zaległości są na końcu tej sekcji.
 
 ### Kamień milowy 1: działa i gra
 
@@ -318,6 +318,17 @@ Numer jest późniejszy, ale PR powstaje przed PR 9. Użytkownik testuje agenta 
 - Wynika z tego zmiana zasad: admin widzi prośby i kod wysyłane do agenta, także z prywatnych utworów. Do tej pory nie miał dostępu do cudzych prywatnych utworów. Informacja jest w UI agenta i w `SECURITY.md`.
 - Znane ograniczenia: tokeny dotyczą ostatniej odpowiedzi w próbie, a koszt obejmuje też ponowienia przy zajętym dostawcy. Przerwany strumień nie zapisuje kosztu ani tokenów (ta sama zaległość co niżej).
 - **Test:** prosisz agenta o zmianę, otwierasz przebieg w panelu, zaznaczasz go, pobierasz plik i odtwarzasz go przez `--from`.
+
+#### PR 14: Wybór modelu w oknie utworu
+
+Użytkownik sam porównuje modele: ta sama prośba na tym samym utworze, najpierw na Claude'ie, potem na tańszych modelach, a wnioski wyciągamy z logów z PR 13.
+
+- Lista modeli do wyboru należy do admina i jest osobnym ustawieniem. Admin dopisuje modele z katalogu OpenRouter wprost w oknie utworu, przy wyborze modelu; widzi ceny za milion tokenów.
+- Wybór działa w poleceniach, czacie, objaśnieniach i komponowaniu. Naprawa po błędzie w odtwarzaczu idzie do tego samego modelu.
+- Decyzje: wybierać może tylko admin, a serwer sprawdza każdy wybór (rola i obecność na liście), bo inni mogliby szybko wyczerpać budżet drogim modelem. Wybrany model nie ma modelu zapasowego i dostaje większy limit tokenów, żeby porównanie było uczciwe. W logach przebieg ma poziom `picked`.
+- „Reuse last request” wpisuje ostatnią prośbę ponownie, żeby porównywać dokładnie tę samą treść.
+- Limity tygodniowe działają bez zmian; porównania na drogich modelach mogą wymagać ich podniesienia w panelu admina.
+- **Test:** dodajesz model w oknie utworu, wybierasz go, prosisz o zmianę, odrzucasz, używasz tej samej prośby na innym modelu i oba przebiegi widzisz w panelu admina.
 
 ### Kamień milowy 4: społeczność
 
