@@ -202,4 +202,52 @@ describe('MIDI conversion and import', () => {
     // Still there for the owner.
     expect((await call(app, alice, 'GET', `/api/midi/${u.id}`)).statusCode).toBe(200);
   });
+
+  it('imports in essence mode, with the form, the brief and the corrected type', async () => {
+    const u = await uploaded(alice);
+    expect(u.analysis.classification.type).toBeDefined();
+    const preview = (
+      await call(app, alice, 'POST', `/api/midi/${u.id}/convert`, { parts: [0, 1], mode: 'essence' })
+    ).json() as MidiConvertResponse;
+    expect(preview.mode).toBe('essence');
+    expect(preview.form?.length).toBeGreaterThan(0);
+    const res = await call(app, alice, 'POST', `/api/midi/${u.id}/import`, {
+      parts: [0, 1],
+      mode: 'essence',
+      title: 'Essence',
+      midiType: 'jazz',
+    });
+    expect(res.statusCode).toBe(201);
+    const { song } = res.json() as MidiImportResponse;
+    expect(song.brief).toMatchObject({ tempo: '110 BPM', style: 'Jazz', meter: '4/4' });
+    expect(song.brief?.form).toBeTruthy();
+  });
+
+  it('rejects unknown modes and types', async () => {
+    const u = await uploaded(alice);
+    for (const body of [
+      { parts: [0], mode: 'other' },
+      { parts: [0], title: 'x', midiType: 'polka' },
+    ]) {
+      const url = 'title' in body ? 'import' : 'convert';
+      expect((await call(app, alice, 'POST', `/api/midi/${u.id}/${url}`, body)).statusCode).toBe(400);
+    }
+  });
+
+  it('the owner can edit the brief, others cannot, and forks keep it', async () => {
+    const u = await uploaded(alice);
+    const { song } = (
+      await call(app, alice, 'POST', `/api/midi/${u.id}/import`, { parts: [0], title: 'T' })
+    ).json() as MidiImportResponse;
+    const brief = { melody: 'A falling line', style: 'Bossa' };
+    const res = await call(app, alice, 'PATCH', `/api/songs/${song.id}`, { brief });
+    expect(res.json()).toMatchObject({ brief });
+    expect((await call(app, bob, 'PATCH', `/api/songs/${song.id}`, { brief })).statusCode).toBe(403);
+    const long = await call(app, alice, 'PATCH', `/api/songs/${song.id}`, {
+      brief: { melody: 'x'.repeat(501) },
+    });
+    expect(long.statusCode).toBe(400);
+    const fork = await call(app, bob, 'POST', `/api/songs/${song.id}/fork`, {});
+    expect(fork.json()).toMatchObject({ brief });
+  });
 });

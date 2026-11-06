@@ -1,5 +1,7 @@
 import {
   analyzeMidi,
+  briefFromMidi,
+  convertEssence,
   cleanMidiFileName,
   convertFaithful,
   MAX_MIDI_BYTES,
@@ -8,6 +10,7 @@ import {
   midiImportRequestSchema,
   parseMidi,
   validateStrudelCode,
+  type MidiFile,
   type MidiConvertResponse,
   type MidiImportResponse,
   type MidiUploadDto,
@@ -31,6 +34,15 @@ const MIDI_TYPES = [
   'application/octet-stream',
 ];
 
+/** The form is always part of the brief, also for faithful imports. */
+function formFor(
+  file: MidiFile,
+  options: z.output<typeof midiConvertOptionsSchema>,
+  result: MidiConvertResponse,
+) {
+  return result.form ?? convertEssence(file, options).form;
+}
+
 function convert(request: FastifyRequest, id: number, body: unknown) {
   const user = currentUser(request);
   const upload = midiUploads.get(request.server.db, user.id, id);
@@ -38,14 +50,17 @@ function convert(request: FastifyRequest, id: number, body: unknown) {
   if (!upload || !data) throw notFound('MIDI file not found');
   const options = parse(midiConvertOptionsSchema, body);
   try {
-    const result = convertFaithful(parseMidi(data), { ...options, fileName: upload.fileName });
+    const file = parseMidi(data);
+    const settings = { ...options, fileName: upload.fileName };
+    const raw = options.mode === 'essence' ? convertEssence(file, settings) : convertFaithful(file, settings);
+    const result: MidiConvertResponse = { ...raw, mode: options.mode };
     // The generated code contains no user text except sanitized names, but check it like agent code anyway.
     const check = validateStrudelCode(result.code, 'strict');
     if (!check.ok) {
       request.log.error({ issues: check.issues }, 'MIDI conversion produced invalid code');
       throw new HttpError(500, 'Conversion failed');
     }
-    return { upload, user, result };
+    return { upload, user, result, file, options };
   } catch (e) {
     if (e instanceof MidiError) throw badRequest(e.message);
     throw e;
@@ -115,7 +130,7 @@ export async function midiRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/midi/:id/import', async (request, reply): Promise<MidiImportResponse> => {
     const { id } = parse(idParams, request.params);
     const body = parse(midiImportRequestSchema, request.body);
-    const { upload, user, result } = convert(request, id, request.body);
+    const { upload, user, result, file, options } = convert(request, id, request.body);
     const song = songs.create(db, {
       ownerId: user.id,
       title: body.title,
@@ -123,6 +138,11 @@ export async function midiRoutes(app: FastifyInstance): Promise<void> {
       code: result.code,
       message: `Imported from ${upload.fileName}`,
       midiUploadId: upload.id,
+      brief: briefFromMidi(file, {
+        parts: options.parts,
+        form: formFor(file, options, result),
+        type: body.midiType,
+      }),
     });
     audit.log(db, 'song.imported', {
       userId: user.id,

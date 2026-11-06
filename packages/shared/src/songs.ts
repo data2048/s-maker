@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { musicBriefSchema, type MusicBrief } from './brief';
 import { MAX_CODE_LENGTH } from './strudel/validate';
 
 export const VISIBILITIES = ['group', 'private'] as const;
@@ -25,8 +26,12 @@ export const updateSongRequestSchema = z
   .object({
     title: songTitleSchema.optional(),
     visibility: z.enum(VISIBILITIES).optional(),
+    brief: musicBriefSchema.optional(),
   })
-  .refine((v) => v.title !== undefined || v.visibility !== undefined, 'Nothing to update');
+  .refine(
+    (v) => v.title !== undefined || v.visibility !== undefined || v.brief !== undefined,
+    'Nothing to update',
+  );
 
 export const saveVersionRequestSchema = z.object({
   code: songCodeSchema,
@@ -74,4 +79,5 @@ export interface VersionDto extends VersionSummaryDto {
 export interface SongDto extends SongSummaryDto {
   currentVersion: VersionDto;
   canEdit: boolean;
+  brief: MusicBrief | null;
 }

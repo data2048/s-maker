@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeMidi,
+  briefFromMidi,
+  classifyMidi,
+  convertEssence,
+  detectForm,
   convertFaithful,
   detectKey,
   drumSoundForKey,
@@ -526,5 +530,195 @@ describe('convertFaithful', () => {
       }))
       .sort(byTime);
     expect(played.keys).toEqual(expected);
+  });
+});
+
+// Evaluates a track with the song's const declarations in front of it.
+async function playEssence(code: string, bars: number): Promise<Record<string, Played[]>> {
+  const { evaluate, noteToMidi } = await strudel();
+  const parsed = parseTracks(code);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const consts = code
+    .split('\n')
+    .filter((l) => l.startsWith('const '))
+    .join('\n');
+  const out: Record<string, Played[]> = {};
+  for (const t of parsed.tracks) {
+    const { pattern } = (await evaluate(`${consts}\n${t.body}`)) as {
+      pattern: { queryArc(a: number, b: number): Hap[] };
+    };
+    out[t.name] = pattern
+      .queryArc(0, bars)
+      .filter((h) => h.whole.begin.valueOf() === h.part.begin.valueOf())
+      .map((h) => {
+        const begin = h.whole.begin.valueOf();
+        const v = h.value;
+        return {
+          bar: Math.floor(begin + 1e-9),
+          at: round(begin - Math.floor(begin + 1e-9)),
+          len: round(h.whole.end.valueOf() - begin),
+          pitch: v.note !== undefined ? (typeof v.note === 'number' ? v.note : noteToMidi(v.note)) : v.s!,
+        };
+      })
+      .sort(byTime);
+  }
+  return out;
+}
+
+describe('detectForm', () => {
+  const bar = (...x: string[]) => new Set(x);
+  it('finds AABA from whole blocks', () => {
+    const A = [bar('a1'), bar('a2'), bar('a3'), bar('a4')];
+    const B = [bar('b1'), bar('b2'), bar('b3'), bar('b4')];
+    const f = detectForm([...A, ...A, ...B, ...A]);
+    expect(f.blockBars).toBe(4);
+    expect(f.sections.map((s) => [s.label, s.bars])).toEqual([
+      ['A', 8],
+      ['B', 4],
+      ['A', 4],
+    ]);
+  });
+  it('treats one repeating bar as one section', () => {
+    const f = detectForm(Array.from({ length: 16 }, () => bar('x', 'y')));
+    expect(f.blockBars).toBe(1);
+    expect(f.sections).toEqual([{ label: 'A', startBar: 0, bars: 16 }]);
+  });
+  it('tolerates small variations within a section', () => {
+    const f = detectForm([bar('a', 'b', 'c', 'd', 'e'), bar('a', 'b', 'c', 'd', 'e', 'f'), bar('z')]);
+    expect(f.sections.map((s) => s.label)).toEqual(['A', 'B']);
+  });
+});
+
+describe('convertEssence', () => {
+  const phrase = (bar: number, pitches: number[]) =>
+    pitches.map((pitch, i) => ({ tick: bar * BAR + i * Q, duration: Q, pitch, velocity: 90 }));
+  const A = (bar: number) => [...phrase(bar, [60, 62, 64, 65]), ...phrase(bar + 1, [67, 65, 64, 62])];
+  const B = (bar: number) => [...phrase(bar, [72, 71, 69, 67]), ...phrase(bar + 1, [69, 71, 72, 74])];
+  const song = [...A(0), ...A(2), ...B(4), ...A(6)];
+  const kick = Array.from({ length: 32 }, (_, i) => ({
+    tick: i * Q,
+    duration: 20,
+    pitch: 36,
+    velocity: 100,
+  }));
+  const file = () =>
+    midi({
+      bpm: 120,
+      tracks: [
+        { name: 'Lead', program: 73, notes: song },
+        { name: 'Drums', channel: 9, notes: kick },
+      ],
+    });
+
+  it('writes sections with arrange and valid code', () => {
+    const r = convertEssence(file());
+    expect(r.form.map((s) => [s.label, s.bars])).toEqual([
+      ['A', 4],
+      ['B', 2],
+      ['A', 2],
+    ]);
+    expect(r.code).toContain('// Form: A (4) B (2) A (2)');
+    expect(r.code).toContain('const lead_a = ');
+    expect(r.code).toContain('lead: arrange([4, lead_a], [2, lead_b], [2, lead_a]).s("gm_flute")');
+    expect(validateStrudelCode(r.code, 'strict').ok).toBe(true);
+    const tracks = parseTracks(r.code).tracks;
+    expect(tracks.map((t) => t.name)).toEqual(['lead', 'drums']);
+    expect(tracks[0]!.instrument).toBe('gm_flute');
+    expect(tracks[1]!.bank).toBe('RolandTR909');
+  });
+
+  it('round trip: an exactly repeating form plays every note', async () => {
+    const r = convertEssence(file());
+    const played = await playEssence(r.code, 8);
+    const expected = song
+      .map((n) => ({
+        bar: Math.floor(n.tick / BAR),
+        at: round((n.tick % BAR) / BAR),
+        len: round(n.duration / BAR),
+        pitch: n.pitch,
+      }))
+      .sort(byTime);
+    expect(played.lead).toEqual(expected);
+    expect(played.drums!.map((p) => p.pitch)).toEqual(new Array(32).fill('bd'));
+  });
+
+  it('keeps the dominant version of a bar and is shorter than faithful on repetitive music', async () => {
+    const notes = [];
+    for (let i = 0; i < 16; i++) notes.push(...phrase(i, [60, 64, 67, 72]));
+    // A fill in bar 10 is dropped.
+    const noisy = notes.filter((n) => !(n.tick === 10 * BAR + Q));
+    noisy.push({ tick: 10 * BAR + Q, duration: Q, pitch: 61, velocity: 90 });
+    const f = midi({ tracks: [{ name: 'Keys', notes: noisy }] });
+    const r = convertEssence(f);
+    expect(r.form).toEqual([{ label: 'A', startBar: 0, bars: 16 }]);
+    expect(r.code).toContain('keys: note("[c4 e4 g4 c5]")');
+    expect(r.code.length).toBeLessThan(convertFaithful(f).code.length);
+    const played = await playEssence(r.code, 16);
+    expect(played.keys!.filter((p) => p.pitch === 61)).toEqual([]);
+    expect(played.keys).toHaveLength(64);
+  });
+
+  it('reduces thick parts to 3 voices', () => {
+    const cluster = [48, 55, 60, 64, 67, 72].map((pitch, i) => ({ tick: 0, duration: BAR - i * 100, pitch }));
+    const r = convertEssence(midi({ tracks: [{ name: 'Pad', notes: cluster }] }), { grid: 8 });
+    expect(r.stats.droppedNotes).toBeGreaterThan(0);
+    const line = r.code.split('\n').find((l) => l.startsWith('pad:'))!;
+    expect((line.match(/, /g) ?? []).length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('classifyMidi', () => {
+  const part = (program: number, isDrums = false) => ({ program, isDrums }) as never;
+  it.each([
+    [[part(0)], 'solo_piano'],
+    [[part(0), part(1)], 'solo_piano'],
+    [[part(0, true), part(33), part(29), part(30)], 'band'],
+    [[part(40), part(41), part(42), part(60), part(73)], 'orchestral'],
+    [[part(0, true), part(38), part(81), part(90)], 'electronic'],
+    [[part(0, true), part(32), part(65), part(0)], 'jazz'],
+    [[part(80), part(81), part(80)], 'chiptune'],
+    [[part(120)], 'other'],
+  ])('classifies %#', (parts, type) => {
+    const c = classifyMidi({ parts, tempoChanges: 0 });
+    expect(c.type).toBe(type);
+    expect(c.reasons.length).toBeGreaterThan(0);
+  });
+  it('is included in the analysis', () => {
+    const a = analyzeMidi(midi({ tracks: [{ program: 0, notes: [{ tick: 0, duration: Q, pitch: 60 }] }] }));
+    expect(a.classification.type).toBe('solo_piano');
+  });
+});
+
+describe('briefFromMidi', () => {
+  it('fills the elements it can read from the file', () => {
+    const notes = [60, 62, 64, 65, 67, 69, 71, 72].map((pitch, i) => ({
+      tick: i * Q,
+      duration: Q / 2,
+      pitch,
+      velocity: i % 4 === 0 ? 120 : 70,
+    }));
+    const b = briefFromMidi(
+      midi({
+        bpm: 90,
+        timeSignature: [4, 4],
+        key: { sf: 0, minor: true },
+        tracks: [{ name: 'Flute', program: 73, notes }],
+      }),
+      { form: [{ label: 'A', startBar: 0, bars: 2 }], type: 'other' },
+    );
+    expect(b).toMatchObject({
+      meter: '4/4',
+      tempo: '90 BPM',
+      key: 'A minor',
+      articulation: 'Mostly staccato',
+      timbre: 'Flute',
+      form: 'A (2)',
+      style: 'Other',
+      accentuation: 'First beat of the bar is stressed',
+    });
+    expect(b.melody).toContain('c4–c5');
+    expect(b.melody).toContain('stepwise');
+    expect(b.texture).toBe('One line');
+    expect(b.dynamics).toContain('mp to ff');
   });
 });

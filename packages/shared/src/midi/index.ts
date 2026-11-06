@@ -3,4 +3,7 @@ export * from './write';
 export * from './gm';
 export * from './analyze';
 export * from './faithful';
+export * from './essence';
+export * from './classify';
+export * from './brief';
 export * from './api';

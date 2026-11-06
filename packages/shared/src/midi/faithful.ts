@@ -10,7 +10,7 @@
 // - Drums (channel 10) become s("bd sd hh ...") on a drum machine bank, one layer per drum sound.
 import { MAX_CODE_LENGTH } from '../strudel/validate';
 import { sanitizeTrackName } from '../strudel/tracks';
-import { analyzeMidi, midiParts, prefersFlats, ticksPerBar } from './analyze';
+import { analyzeMidi, midiParts, prefersFlats, ticksPerBar, type MidiPart } from './analyze';
 import { DRUM_SOUNDS, drumSoundForKey } from './gm';
 import { MidiError, type MidiFile, type MidiNote } from './parse';
 
@@ -53,7 +53,7 @@ export interface ConversionResult {
   stats: { tracks: number; notes: number; droppedNotes: number; shortenedNotes: number };
 }
 
-interface Ev {
+export interface Ev {
   start: number;
   end: number;
   /** Mini-notation token: "c4", "[c4,e4]", "bd". */
@@ -70,15 +70,15 @@ export function noteName(pitch: number, flats = false): string {
   return `${(flats ? FLATS : SHARPS)[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
 }
 
-const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+export const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
 
 /** Number with up to 2 decimals and no leading zero: 0.79 -> ".79", 1 -> "1". */
-function num(x: number): string {
+export function num(x: number): string {
   const s = (Math.round(x * 100) / 100).toString();
   return s.startsWith('0.') ? s.slice(1) : s;
 }
 
-function stepsPerBarFor(file: MidiFile, grid: number): number | null {
+export function stepsPerBarFor(file: MidiFile, grid: number): number | null {
   const ts = file.timeSignatures[0] ?? { numerator: 4, denominator: 4 };
   const spb = (grid * 4 * ts.numerator) / ts.denominator;
   return Number.isInteger(spb) ? spb : null;
@@ -104,7 +104,13 @@ export function detectGrid(file: MidiFile, notes: MidiNote[]): GridSteps {
  * One bar of one voice as mini-notation. `uniform` (drums) ignores durations and puts the hits on equal
  * slots, which gives the familiar drum notation ("bd ~ sd ~"). Repeating groups become "[...]*n".
  */
-function renderBar(events: Ev[], barStart: number, spb: number, withVelocity: boolean, uniform = false) {
+export function renderBar(
+  events: Ev[],
+  barStart: number,
+  spb: number,
+  withVelocity: boolean,
+  uniform = false,
+) {
   type Item = { w: number; token: string; vel: string };
   const items: Item[] = [];
   if (uniform) {
@@ -146,7 +152,7 @@ function renderBar(events: Ev[], barStart: number, spb: number, withVelocity: bo
 }
 
 /** Bars → `<bar1 bar2!3 ...>`, 4 bars per line. */
-function renderSequence(bars: string[], indent: string): string {
+export function renderSequence(bars: string[], indent: string): string {
   const entries: { text: string; count: number }[] = [];
   for (const b of bars) {
     const last = entries[entries.length - 1];
@@ -156,7 +162,7 @@ function renderSequence(bars: string[], indent: string): string {
   // The same bar all the way through: no need for <...> at all.
   if (entries.length === 1) return entries[0]!.text;
   const parts = entries.map(({ text, count }) => {
-    const t = count > 1 && text.includes('*') && !text.startsWith('[') ? `[${text}]` : text;
+    const t = count > 1 && /\*\d+(\uE001\d+)?$/.test(text) ? `[${text}]` : text;
     return { text: count > 1 ? `${t}!${count}` : t, count };
   });
   const lines: string[] = [];
@@ -175,7 +181,119 @@ function renderSequence(bars: string[], indent: string): string {
   return lines.length === 1 ? `<${lines[0]}>` : `<${lines.join(`\n${indent} `)}>`;
 }
 
-const quote = (mini: string) => (mini.includes('\n') ? `\`${mini}\`` : `"${mini}"`);
+export const quote = (mini: string) => (mini.includes('\n') ? `\`${mini}\`` : `"${mini}"`);
+
+export interface VoiceContext {
+  startTick: number;
+  endTick: number;
+  stepTicks: number;
+  spb: number;
+  totalSteps: number;
+  flats: boolean;
+  maxVoices?: number;
+}
+
+/** Quantizes one part and splits it into non-overlapping voices (one voice per drum sound for drums). */
+export function partVoices(part: MidiPart, notes: MidiNote[], ctx: VoiceContext) {
+  const { startTick, endTick, stepTicks, spb, totalSteps, flats } = ctx;
+  const maxVoices = ctx.maxVoices ?? MAX_VOICES;
+  let shortened = 0;
+  let dropped = 0;
+  let approximatedDrums = 0;
+  const q: { start: number; end: number; pitch: number; velocity: number }[] = [];
+  for (const n of notes) {
+    if (n.tick < startTick || n.tick >= endTick) continue;
+    const start = Math.round((n.tick - startTick) / stepTicks);
+    if (start >= totalSteps) continue;
+    let end = Math.max(start + 1, Math.round((n.tick + n.duration - startTick) / stepTicks));
+    const barEnd = (Math.floor(start / spb) + 1) * spb;
+    if (end > barEnd) {
+      end = barEnd;
+      shortened++;
+    }
+    q.push({ start, end, pitch: n.pitch, velocity: n.velocity });
+  }
+
+  let voices: Ev[][];
+  if (part.isDrums) {
+    // One layer per drum sound; a hit lasts until the next hit of the same sound (keeps the code short,
+    // drum samples play to their end anyway).
+    const bySound = new Map<string, Map<number, number>>();
+    for (const n of q) {
+      const { sound, exact } = drumSoundForKey(n.pitch);
+      if (!exact) approximatedDrums++;
+      const hits = bySound.get(sound) ?? new Map<number, number>();
+      hits.set(n.start, Math.max(hits.get(n.start) ?? 0, n.velocity));
+      bySound.set(sound, hits);
+    }
+    voices = DRUM_SOUNDS.filter((s) => bySound.has(s)).map((sound) => {
+      const starts = [...bySound.get(sound)!.entries()].sort((a, b) => a[0] - b[0]);
+      return starts.map(([start, velocity], i) => {
+        const barEnd = (Math.floor(start / spb) + 1) * spb;
+        const next = starts[i + 1]?.[0] ?? totalSteps;
+        return { start, end: Math.min(next, barEnd), token: sound, velocity, pitch: 0 };
+      });
+    });
+  } else {
+    // Notes with the same start and end form a chord.
+    const chords = new Map<string, { start: number; end: number; pitches: Set<number>; velocity: number }>();
+    for (const n of q) {
+      const key = `${n.start}:${n.end}`;
+      const c = chords.get(key) ?? { start: n.start, end: n.end, pitches: new Set<number>(), velocity: 0 };
+      c.pitches.add(n.pitch);
+      c.velocity = Math.max(c.velocity, n.velocity);
+      chords.set(key, c);
+    }
+    const events: Ev[] = [];
+    for (const c of chords.values()) {
+      const pitches = [...c.pitches].sort((a, b) => a - b);
+      const names = pitches.map((p) => noteName(p, flats));
+      events.push({
+        start: c.start,
+        end: c.end,
+        token: names.length > 1 ? `[${names.join(',')}]` : names[0]!,
+        velocity: c.velocity,
+        pitch: pitches[pitches.length - 1]!,
+      });
+    }
+    // Voice allocation: earliest first, higher notes first, each event into the first free voice.
+    events.sort((a, b) => a.start - b.start || b.pitch - a.pitch);
+    voices = [];
+    const voiceEnd: number[] = [];
+    for (const e of events) {
+      let v = voiceEnd.findIndex((end) => end <= e.start);
+      if (v < 0) {
+        if (voices.length >= maxVoices) {
+          dropped += e.token.split(',').length;
+          continue;
+        }
+        v = voices.length;
+        voices.push([]);
+        voiceEnd.push(0);
+      }
+      voices[v]!.push(e);
+      voiceEnd[v] = e.end;
+    }
+  }
+  return { voices, noteCount: q.length, shortened, dropped, approximatedDrums };
+}
+
+/** Track label for a part, unique among `used`. */
+export function partLabel(part: MidiPart, used: Set<string>): string {
+  let label = sanitizeTrackName(
+    part.isDrums && /^(drums?|percussion|track)\b/i.test(part.name) ? 'drums' : part.name,
+  );
+  for (let i = 2; used.has(label); i++) label = `${sanitizeTrackName(part.name)}_${i}`.slice(0, 32);
+  used.add(label);
+  return label;
+}
+
+export function safeFileName(name: string | undefined): string {
+  return (name ?? '')
+    .replace(/[^\w .()-]/g, '')
+    .slice(0, 60)
+    .trim();
+}
 
 export function convertFaithful(file: MidiFile, options: FaithfulOptions = {}): ConversionResult {
   const analysis = analyzeMidi(file);
@@ -236,90 +354,16 @@ export function convertFaithful(file: MidiFile, options: FaithfulOptions = {}): 
   const blocks: string[] = [];
 
   for (const { part, notes } of selected) {
-    const events: Ev[] = [];
-    // Quantize.
-    const q: { start: number; end: number; pitch: number; velocity: number }[] = [];
-    for (const n of notes) {
-      if (!inRange(n)) continue;
-      const start = Math.round((n.tick - startTick) / stepTicks);
-      if (start >= totalSteps) continue;
-      let end = Math.max(start + 1, Math.round((n.tick + n.duration - startTick) / stepTicks));
-      const barEnd = (Math.floor(start / spb) + 1) * spb;
-      if (end > barEnd) {
-        end = barEnd;
-        shortened++;
-      }
-      q.push({ start, end, pitch: n.pitch, velocity: n.velocity });
-    }
-    if (!q.length) {
+    const q = partVoices(part, notes, { startTick, endTick, stepTicks, spb, totalSteps, flats });
+    shortened += q.shortened;
+    dropped += q.dropped;
+    approximatedDrums += q.approximatedDrums;
+    noteTotal += q.noteCount;
+    if (!q.noteCount) {
       warnings.push(`"${part.name}" has no notes in the chosen bars and was skipped.`);
       continue;
     }
-    noteTotal += q.length;
-
-    let voices: Ev[][];
-    if (part.isDrums) {
-      // One layer per drum sound; a hit lasts until the next hit of the same sound (keeps the code short,
-      // drum samples play to their end anyway).
-      const bySound = new Map<string, Map<number, number>>();
-      for (const n of q) {
-        const { sound, exact } = drumSoundForKey(n.pitch);
-        if (!exact) approximatedDrums++;
-        const hits = bySound.get(sound) ?? new Map<number, number>();
-        hits.set(n.start, Math.max(hits.get(n.start) ?? 0, n.velocity));
-        bySound.set(sound, hits);
-      }
-      voices = DRUM_SOUNDS.filter((s) => bySound.has(s)).map((sound) => {
-        const starts = [...bySound.get(sound)!.entries()].sort((a, b) => a[0] - b[0]);
-        return starts.map(([start, velocity], i) => {
-          const barEnd = (Math.floor(start / spb) + 1) * spb;
-          const next = starts[i + 1]?.[0] ?? totalSteps;
-          return { start, end: Math.min(next, barEnd), token: sound, velocity, pitch: 0 };
-        });
-      });
-    } else {
-      // Notes with the same start and end form a chord.
-      const chords = new Map<
-        string,
-        { start: number; end: number; pitches: Set<number>; velocity: number }
-      >();
-      for (const n of q) {
-        const key = `${n.start}:${n.end}`;
-        const c = chords.get(key) ?? { start: n.start, end: n.end, pitches: new Set<number>(), velocity: 0 };
-        c.pitches.add(n.pitch);
-        c.velocity = Math.max(c.velocity, n.velocity);
-        chords.set(key, c);
-      }
-      for (const c of chords.values()) {
-        const pitches = [...c.pitches].sort((a, b) => a - b);
-        const names = pitches.map((p) => noteName(p, flats));
-        events.push({
-          start: c.start,
-          end: c.end,
-          token: names.length > 1 ? `[${names.join(',')}]` : names[0]!,
-          velocity: c.velocity,
-          pitch: pitches[pitches.length - 1]!,
-        });
-      }
-      // Voice allocation: earliest first, higher notes first, each event into the first free voice.
-      events.sort((a, b) => a.start - b.start || b.pitch - a.pitch);
-      voices = [];
-      const voiceEnd: number[] = [];
-      for (const e of events) {
-        let v = voiceEnd.findIndex((end) => end <= e.start);
-        if (v < 0) {
-          if (voices.length >= MAX_VOICES) {
-            dropped += e.token.split(',').length;
-            continue;
-          }
-          v = voices.length;
-          voices.push([]);
-          voiceEnd.push(0);
-        }
-        voices[v]!.push(e);
-        voiceEnd[v] = e.end;
-      }
-    }
+    const voices = q.voices;
 
     // Dynamics: one value for the track when velocities hardly change, otherwise a pattern per voice.
     const vels = voices.flat().map((e) => e.velocity);
@@ -329,11 +373,7 @@ export function convertFaithful(file: MidiFile, options: FaithfulOptions = {}): 
     const constVelocity =
       keepVelocity && !perNoteVelocity ? vels.reduce((s, v) => s + v, 0) / vels.length : null;
 
-    let label = sanitizeTrackName(
-      part.isDrums && /^(drums?|percussion|track)\b/i.test(part.name) ? 'drums' : part.name,
-    );
-    for (let i = 2; usedLabels.has(label); i++) label = `${sanitizeTrackName(part.name)}_${i}`.slice(0, 32);
-    usedLabels.add(label);
+    const label = partLabel(part, usedLabels);
 
     const fn = part.isDrums ? 's' : 'note';
     const lanes = voices.map((voice) => {
@@ -380,10 +420,7 @@ export function convertFaithful(file: MidiFile, options: FaithfulOptions = {}): 
 
   const ts = analysis.timeSignature;
   const quarters = (4 * ts.numerator) / ts.denominator;
-  const safeName = (options.fileName ?? '')
-    .replace(/[^\w .()-]/g, '')
-    .slice(0, 60)
-    .trim();
+  const safeName = safeFileName(options.fileName);
   const header = [
     `// Imported from MIDI${safeName ? ` "${safeName}"` : ''}: bars ${startBar + 1}-${startBar + bars}, ${
       GRID_LABELS[grid as GridSteps] ?? `1/${grid * 4}`

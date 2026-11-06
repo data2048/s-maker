@@ -4,6 +4,7 @@ import {
   NEW_SONG_CODE,
   saveVersionRequestSchema,
   updateSongRequestSchema,
+  type MusicBrief,
   type SongDto,
   type SongSummaryDto,
   type VersionDto,
@@ -146,6 +147,7 @@ export async function songRoutes(app: FastifyInstance): Promise<void> {
       message: `Forked from "${song.title}" v${source.number}`,
       forkedFromSongId: song.id,
       forkedFromVersionId: source.id,
+      brief: song.brief ? (JSON.parse(song.brief) as MusicBrief) : null,
     });
     audit.log(db, 'song.forked', {
       userId: user.id,

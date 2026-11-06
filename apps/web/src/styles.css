@@ -871,3 +871,27 @@ label.btn.disabled {
 .link-btn:hover {
   text-decoration: underline;
 }
+
+.form-line {
+  margin: 6px 0;
+}
+
+.brief-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.brief-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brief-field textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.85rem;
+}
