@@ -16,6 +16,9 @@ s-maker is built against the OWASP Top 10. The main rules:
   in the sandboxed player, and the user accepts it after listening. Explanations are rendered through
   DOMPurify with a short allowlist: no images, scripts, styles or event handlers. Text from songs and files is
   marked as data in prompts, and the agent's spending has weekly limits.
+- **Exports are made next to untrusted code,** so the app checks what the player returns: audio must have the
+  right file signature and size, notes are validated and the app writes the MIDI file itself. Nothing goes to
+  the server.
 - **Access control is enforced on the server** for every resource (owner, visibility, role); deny by default.
 - **Authentication:** invite-only accounts, argon2id password hashes, random session ids stored as hashes,
   `HttpOnly` + `Secure` + `SameSite` cookies, CSRF protection, rate limiting on login.

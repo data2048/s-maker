@@ -15,6 +15,7 @@ import { AgentPanel } from '../components/AgentPanel';
 import { BriefPanel } from '../components/BriefPanel';
 import { ChatPanel } from '../components/ChatPanel';
 import { ExplainPanel } from '../components/ExplainPanel';
+import { ExportPanel } from '../components/ExportPanel';
 import { ErrorBox } from '../components/Form';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { Mixer } from '../components/Mixer';
@@ -59,7 +60,7 @@ export function SongPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [panel, setPanel] = useState<'history' | 'brief' | 'chat' | 'explain' | null>(
+  const [panel, setPanel] = useState<'history' | 'brief' | 'chat' | 'explain' | 'export' | null>(
     searchParams.get('chat') ? 'chat' : null,
   );
   const [agentTrack, setAgentTrack] = useState<string | null>(null);
@@ -174,6 +175,12 @@ export function SongPage() {
       })
       .catch(() => {});
   }, [canEdit, playerState.ready, song]);
+
+  // On a phone the panel opens below the player and the mixer, out of sight.
+  useEffect(() => {
+    if (panel && window.matchMedia('(max-width: 760px)').matches)
+      document.querySelector('.song-grid .history')?.scrollIntoView({ block: 'start' });
+  }, [panel]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -330,6 +337,13 @@ export function SongPage() {
         </button>
         <button
           className="btn"
+          onClick={() => setPanel((p) => (p === 'export' ? null : 'export'))}
+          aria-pressed={panel === 'export'}
+        >
+          Export
+        </button>
+        <button
+          className="btn"
           onClick={() => setPanel((p) => (p === 'brief' ? null : 'brief'))}
           aria-pressed={panel === 'brief'}
         >
@@ -411,6 +425,14 @@ export function SongPage() {
             baseVersionId={baseVersionId}
             agent={agent}
             onBriefChanged={(brief) => setSong({ ...song, brief })}
+            onClose={() => setPanel(null)}
+          />
+        )}
+        {panel === 'export' && (
+          <ExportPanel
+            title={song.title}
+            code={code}
+            player={player.current}
             onClose={() => setPanel(null)}
           />
         )}

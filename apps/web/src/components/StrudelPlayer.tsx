@@ -4,6 +4,8 @@ import {
   fromSandboxSchema,
   SANDBOX_PATH,
   type EditorSettings,
+  type ExportFormat,
+  type MidiExport,
   type ToSandbox,
 } from '@s-maker/shared';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -27,12 +29,35 @@ export interface PlayerState {
   error: string | null;
 }
 
+export type ExportStage = 'sounds' | 'render' | 'encode';
+
+export interface ExportResult {
+  bytes?: ArrayBuffer;
+  midi?: MidiExport;
+}
+
+interface PendingExport {
+  resolve(result: ExportResult): void;
+  reject(error: Error): void;
+  onStage(stage: ExportStage): void;
+}
+
+/** Slower than this and something has gone wrong: a song cannot be longer than five minutes. */
+const EXPORT_TIMEOUT_MS = 15 * 60_000;
+
 export interface StrudelPlayerHandle {
   play(): void;
   stop(): void;
   setCode(code: string): void;
   /** Tries code without playing it. Resolves with the problem, or null when it is fine. */
   check(code: string): Promise<string | null>;
+  /** Makes a file from the code. Rejects with a message for the user. */
+  exportSong(
+    code: string,
+    format: ExportFormat,
+    bars: number,
+    onStage: (stage: ExportStage) => void,
+  ): Promise<ExportResult>;
 }
 
 interface Props {
@@ -59,6 +84,7 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
   const frame = useRef<HTMLIFrameElement>(null);
   const checks = useRef(new Map<number, (error: string | null) => void>());
   const checkId = useRef(0);
+  const exports = useRef(new Map<number, PendingExport>());
   const [ready, setReady] = useState(false);
   const lastSent = useRef<string | null>(null);
   const callbacks = useRef({ onCodeChange, onStateChange, onSave });
@@ -86,6 +112,25 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
           if (checks.current.delete(id)) resolve(null);
         }, 10_000);
       }),
+    exportSong: (c, format, bars, onStage) =>
+      new Promise<ExportResult>((resolve, reject) => {
+        const id = ++checkId.current;
+        const timer = setTimeout(() => {
+          if (exports.current.delete(id)) reject(new Error('The export took too long.'));
+        }, EXPORT_TIMEOUT_MS);
+        exports.current.set(id, {
+          resolve: (r) => {
+            clearTimeout(timer);
+            resolve(r);
+          },
+          reject: (e) => {
+            clearTimeout(timer);
+            reject(e);
+          },
+          onStage,
+        });
+        post({ type: 'export', id, code: c, format, bars });
+      }),
   }));
 
   useEffect(() => {
@@ -107,6 +152,17 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
       } else if (msg.type === 'checked') {
         checks.current.get(msg.id)?.(msg.error);
         checks.current.delete(msg.id);
+      } else if (msg.type === 'exportProgress') {
+        exports.current.get(msg.id)?.onStage(msg.stage);
+      } else if (msg.type === 'exported') {
+        const pending = exports.current.get(msg.id);
+        exports.current.delete(msg.id);
+        if (msg.error) pending?.reject(new Error(msg.error));
+        else
+          pending?.resolve({
+            ...(msg.bytes ? { bytes: msg.bytes } : {}),
+            ...(msg.midi ? { midi: msg.midi } : {}),
+          });
       } else if (msg.type === 'code') {
         lastSent.current = msg.code;
         callbacks.current.onCodeChange?.(msg.code);

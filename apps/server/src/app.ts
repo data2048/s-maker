@@ -115,6 +115,8 @@ export async function buildApp({ config, db, llm }: AppDeps): Promise<FastifyIns
     await app.register(fastifyStatic, {
       root: webDist,
       wildcard: false,
+      // Sends the .br or .gz file made at build time, when the browser accepts it.
+      preCompressed: true,
       setHeaders(res, path) {
         const p = path.replaceAll('\\', '/');
         if (p.endsWith(SANDBOX_PATH)) {
