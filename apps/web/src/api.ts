@@ -1,4 +1,4 @@
-import { CSRF_HEADER } from '@s-maker/shared';
+import { CSRF_HEADER, type AgentStreamEvent } from '@s-maker/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -32,6 +32,41 @@ export async function api<T>(method: Method, url: string, body?: unknown): Promi
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+/** Posts a request and hands over each line of the streamed answer as it arrives. */
+export async function streamApi(
+  url: string,
+  body: unknown,
+  onEvent: (event: AgentStreamEvent) => void,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    Accept: 'application/x-ndjson',
+    'Content-Type': 'application/json',
+  };
+  if (csrfToken) headers[CSRF_HEADER] = csrfToken;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as AgentStreamEvent);
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentStreamEvent);
 }
 
 /** Uploads a file as the raw request body (no multipart), e.g. a .mid file. */

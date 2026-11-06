@@ -1,4 +1,12 @@
-import type { AgentAdminDto, AgentProposalDto, AgentUsageDto, SongDto, VersionDto } from '@s-maker/shared';
+import type {
+  AgentAdminDto,
+  AgentChatDto,
+  AgentProposalDto,
+  AgentStreamEvent,
+  AgentUsageDto,
+  SongDto,
+  VersionDto,
+} from '@s-maker/shared';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -19,6 +27,7 @@ function fakeLlm(enabled = true) {
     enabled,
     async chat(req) {
       requests.push(req);
+      for (const text of fake.onText) req.onText?.(text);
       const next = queue.shift();
       if (next === undefined) throw new Error('no fake answer queued');
       if (next instanceof Error) throw next;
@@ -36,7 +45,8 @@ function fakeLlm(enabled = true) {
       return ['deepseek/deepseek-v4.1-flash', 'z-ai/glm-5.3', 'other/model'];
     },
   };
-  return { client, queue, requests };
+  const fake = { client, queue, requests, onText: [] as string[] };
+  return fake;
 }
 
 const answer = (changes: unknown[], extra: object = {}) =>
@@ -362,6 +372,162 @@ describe('costs', () => {
   });
 });
 
+describe('chat', () => {
+  const chat = (client: Client, message: string, extra: object = {}) =>
+    call(app, client, 'POST', `/api/songs/${song.id}/agent/chat`, {
+      message,
+      code: song.currentVersion.code,
+      baseVersionId: song.currentVersion.id,
+      ...extra,
+    });
+  const events = (body: string) =>
+    body
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as AgentStreamEvent);
+
+  it('answers a question without changing anything and keeps the conversation', async () => {
+    llm.queue.push(JSON.stringify({ reply: 'It is in C major.' }));
+    const res = await chat(alice, 'What key is this?');
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('application/x-ndjson');
+    const done = events(res.body).at(-1) as Extract<AgentStreamEvent, { type: 'done' }>;
+    expect(done.proposal).toBeNull();
+    expect(done.message?.content).toBe('It is in C major.');
+    const log = (await call(app, alice, 'GET', `/api/songs/${song.id}/agent/chat`)).json() as AgentChatDto;
+    expect(log.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(log.pending).toBeNull();
+  });
+
+  it('streams the reply as it arrives', async () => {
+    llm.onText = ['{"reply":"It', '{"reply":"It is', '{"reply":"It is C major","changes":[]}'];
+    llm.queue.push(JSON.stringify({ reply: 'It is C major' }));
+    const list = events((await chat(alice, 'Key?')).body);
+    const deltas = list.flatMap((e) => (e.type === 'delta' ? [e.text] : []));
+    expect(deltas.join('')).toBe('It is C major');
+    expect(deltas.length).toBeGreaterThan(1);
+    expect(llm.requests[0]!.onText).toBeDefined();
+  });
+
+  it('gives a change as a proposal, which becomes a new version when accepted', async () => {
+    llm.queue.push(JSON.stringify({ reply: 'Done.', summary: 'Synth bass', changes: [newBass] }));
+    const done = events((await chat(alice, 'Synth bass')).body).at(-1) as Extract<
+      AgentStreamEvent,
+      { type: 'done' }
+    >;
+    expect(done.proposal?.code).toContain('gm_synth_bass_1');
+    expect(done.message?.proposalStatus).toBe('pending');
+    const before = (await call(app, alice, 'GET', `/api/songs/${song.id}/agent/chat`)).json() as AgentChatDto;
+    expect(before.pending?.id).toBe(done.proposal!.id);
+
+    const accepted = await call(
+      app,
+      alice,
+      'POST',
+      `/api/songs/${song.id}/agent/proposals/${done.proposal!.id}/accept`,
+    );
+    expect(accepted.statusCode).toBe(201);
+    const after = (await call(app, alice, 'GET', `/api/songs/${song.id}/agent/chat`)).json() as AgentChatDto;
+    expect(after.pending).toBeNull();
+    expect(after.messages.at(-1)?.proposalStatus).toBe('accepted');
+  });
+
+  it('records decisions in the brief when nothing else changes', async () => {
+    llm.queue.push(JSON.stringify({ reply: 'Noted.', brief: { tempo: 'slow' } }));
+    const done = events((await chat(alice, 'Let us go slow')).body).at(-1) as Extract<
+      AgentStreamEvent,
+      { type: 'done' }
+    >;
+    expect(done.brief).toMatchObject({ tempo: 'slow' });
+    const s = (await call(app, alice, 'GET', `/api/songs/${song.id}`)).json() as SongDto;
+    expect(s.brief).toMatchObject({ tempo: 'slow' });
+  });
+
+  it('sends earlier messages to the model, without the old song', async () => {
+    llm.queue.push(JSON.stringify({ reply: 'One' }), JSON.stringify({ reply: 'Two' }));
+    await chat(alice, 'First question');
+    await chat(alice, 'Second question');
+    const roles = llm.requests[1]!.messages;
+    expect(roles.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(roles[1]!.content).toBe('First question');
+    expect(roles[3]!.content).toContain('Second question');
+  });
+
+  it('reports problems as events and never shows forbidden code', async () => {
+    const evil = answer([{ type: 'track', name: 'bass', code: 'window.location="https://evil.example"' }]);
+    llm.queue.push(...Array<string>(6).fill(evil));
+    const res = await chat(alice, 'Do it');
+    expect(res.statusCode).toBe(200);
+    expect(events(res.body).at(-1)?.type).toBe('error');
+    expect(res.body).not.toContain('evil.example');
+  });
+
+  it('stops at the weekly limit before calling a model', async () => {
+    llm.queue.push({ content: JSON.stringify({ reply: 'Pricey' }), costUsd: 3 });
+    await chat(alice, 'One');
+    const n = llm.requests.length;
+    const list = events((await chat(alice, 'Two')).body);
+    expect(list.at(-1)).toMatchObject({ type: 'error', error: expect.stringContaining('limit') as string });
+    expect(llm.requests.length).toBe(n);
+  });
+
+  it('is only for the owner, and each conversation is private', async () => {
+    expect((await chat(bob, 'Hi')).statusCode).toBe(403);
+    expect((await call(app, bob, 'GET', `/api/songs/${song.id}/agent/chat`)).statusCode).toBe(403);
+  });
+});
+
+describe('compose', () => {
+  const composed = JSON.stringify({
+    title: 'Night Walk',
+    summary: 'A short piece',
+    changes: [
+      { type: 'header', code: 'setcpm(90/4)\nconst verse_bass = note("c2 g1").s("gm_acoustic_bass")' },
+      { type: 'add', name: 'bass', code: 'arrange([4, verse_bass])' },
+    ],
+    brief: { tempo: '90 BPM' },
+  });
+  const compose = (body: object) => call(app, alice, 'POST', '/api/agent/compose', body);
+  const last = (body: string) =>
+    JSON.parse(body.trim().split('\n').at(-1)!) as Extract<AgentStreamEvent, { type: 'done' | 'error' }>;
+
+  it('creates a private song whose first version waits to be accepted', async () => {
+    llm.queue.push(composed);
+    const done = last((await compose({ description: 'Calm', brief: { key: 'C minor' } })).body);
+    if (done.type !== 'done') throw new Error(done.error);
+    const s = (await call(app, alice, 'GET', `/api/songs/${done.songId}`)).json() as SongDto;
+    expect(s.title).toBe('Night Walk');
+    expect(s.visibility).toBe('private');
+    expect(s.brief).toEqual({ key: 'C minor', tempo: '90 BPM' });
+    expect(s.currentVersion.code).not.toContain('verse_bass');
+    const log = (await call(app, alice, 'GET', `/api/songs/${s.id}/agent/chat`)).json() as AgentChatDto;
+    expect(log.pending?.code).toContain('arrange([4, verse_bass])');
+    expect(log.messages[0]).toMatchObject({ role: 'user', content: 'Calm' });
+    expect(llm.requests[0]!.model).toBe('deepseek/deepseek-v4-pro-0813');
+  });
+
+  it('takes the title the user gave', async () => {
+    llm.queue.push(composed);
+    const done = last((await compose({ title: 'Mine', description: 'Calm' })).body);
+    if (done.type !== 'done') throw new Error(done.error);
+    const s = (await call(app, alice, 'GET', `/api/songs/${done.songId}`)).json() as SongDto;
+    expect(s.title).toBe('Mine');
+  });
+
+  it('needs a description or an element', async () => {
+    expect((await compose({ description: ' ', brief: {} })).statusCode).toBe(400);
+  });
+
+  it('creates no song when the agent fails', async () => {
+    const before = ((await call(app, alice, 'GET', '/api/songs')).json() as { songs: unknown[] }).songs
+      .length;
+    llm.queue.push(...Array<string>(6).fill('not json'));
+    expect(last((await compose({ description: 'Calm' })).body).type).toBe('error');
+    const after = ((await call(app, alice, 'GET', '/api/songs')).json() as { songs: unknown[] }).songs.length;
+    expect(after).toBe(before);
+  });
+});
+
 describe('admin settings', () => {
   const settings = {
     modelFast: 'deepseek/deepseek-v4.1-flash',
@@ -469,6 +635,32 @@ describe('OpenRouter client', () => {
       .catch((x: Error) => x);
     expect(e).toBeInstanceOf(LlmError);
     expect((e as LlmError).costUsd).toBeCloseTo(0.015);
+  });
+
+  it('reads a streamed answer and its cost', async () => {
+    const sse = [
+      ': OPENROUTER PROCESSING',
+      'data: {"model":"m/x","choices":[{"delta":{"content":"he"}}]}',
+      'data: {"choices":[{"delta":{"content":"llo"}}]}',
+      'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"cost":0.002}}',
+      'data: [DONE]',
+      '',
+    ].join('\n\n');
+    const seen: string[] = [];
+    let sent: Record<string, unknown> = {};
+    const r = await client((async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(init.body as string) as Record<string, unknown>;
+      return new Response(sse, { status: 200 });
+    }) as typeof fetch).chat({ ...req, onText: (t) => seen.push(t) });
+    expect(sent.stream).toBe(true);
+    expect(seen).toEqual(['he', 'hello']);
+    expect(r).toEqual({
+      content: 'hello',
+      model: 'm/x',
+      promptTokens: 3,
+      completionTokens: 2,
+      costUsd: 0.002,
+    });
   });
 
   it('refuses without a key', async () => {

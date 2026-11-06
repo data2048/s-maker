@@ -70,6 +70,9 @@ export function HomePage() {
         <Link to="/import" className="btn">
           Import MIDI
         </Link>
+        <Link className="btn" to="/compose">
+          Compose with agent
+        </Link>
         <button className="btn primary" onClick={createSong} disabled={creating}>
           New song
         </button>
