@@ -67,6 +67,9 @@ export function HomePage() {
       <div className="row">
         <h1>Hi, {user?.displayName}</h1>
         <div className="spacer" />
+        <Link to="/import" className="btn">
+          Import MIDI
+        </Link>
         <button className="btn primary" onClick={createSong} disabled={creating}>
           New song
         </button>

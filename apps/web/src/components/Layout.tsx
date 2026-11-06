@@ -20,6 +20,7 @@ export function Layout() {
           <NavLink to="/" end>
             Home
           </NavLink>
+          <NavLink to="/import">Import MIDI</NavLink>
           <NavLink to="/playground">Playground</NavLink>
           {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
         </nav>

@@ -9,3 +9,4 @@ export * from './strudel/tracks';
 export * from './strudel/instruments';
 export * from './songs';
 export * from './diff';
+export * from './midi';
