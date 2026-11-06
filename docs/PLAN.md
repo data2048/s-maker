@@ -202,7 +202,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
 Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./deploy.sh <branch>`) → merge do `main`.
 
-**Stan (2026-11-06):** PR 0–8 scalone do `main`. Następny: PR 9. Zaległości są na końcu tej sekcji.
+**Stan (2026-11-06):** PR 0–8 scalone do `main`, PR 12 zrobiony przed PR 9–11. Następny: PR 9. Zaległości są na końcu tej sekcji.
 
 ### Kamień milowy 1: działa i gra
 
@@ -331,9 +331,11 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 
 #### PR 12: Eksport i mobile
 
-- Nagrywanie wyjścia audio do WAV (i ewentualnie MP3), eksport utworu do MIDI.
-- Dopracowanie układu na telefon, odblokowanie audio na iOS, lżejsze ładowanie soundfontów.
-- Opcjonalnie: lokalny mirror sampli i soundfontów w kontenerze.
+- Eksport do MP3, WAV i MIDI. Plik powstaje w przeglądarce i nie trafia na serwer. Dźwięk jest renderowany szybciej niż w czasie rzeczywistym, w piaskownicy; aplikacja sprawdza wynik, zanim zaproponuje pobranie. Limit 5 minut.
+- Układ na telefon, większe cele dotyku, odblokowanie dźwięku także na dotyk.
+- Pomiar pokazał, że spisy soundfontów to tylko 60 KB, więc nie było co odchudzać. Prawdziwy zysk to kompresja kodu aplikacji przy budowaniu: z 2,63 MB do 0,60 MB.
+- Lokalny mirror sampli: odłożony, duże pliki w kontenerze bez realnego problemu do rozwiązania.
+- **Test:** eksportujesz utwór do MP3 i słyszysz go w odtwarzaczu na komputerze; na telefonie grasz utwór dotykiem.
 
 Duże PR-y mogą zostać podzielone na mniejsze w trakcie pracy.
 
@@ -341,6 +343,7 @@ Duże PR-y mogą zostać podzielone na mniejsze w trakcie pracy.
 
 Do sprawdzenia przez człowieka:
 
+- Dźwięk na prawdziwym iPhonie: testy używają emulacji telefonu w Edge/Chromium, a nie Safari na iOS. Przełącznik wyciszenia w iPhonie może wyciszać dźwięk z aplikacji.
 - Odsłuch muzyki z agenta: test porównujący modele sprawdza, czy kod działa, a nie czy brzmi dobrze. Od tego zależy wybór `MODEL_STRONG`.
 - Import prawdziwych plików MIDI: dotąd testowany tylko na plikach generowanych.
 
@@ -408,7 +411,7 @@ Każdy PR dopisuje do skryptu i `.env.example` to, czego potrzebuje (nowe zmienn
 | Strudel może nie działać w pełni w sandboxie z originem `null` (np. localStorage) | spike na początku PR 2; plan B: osobna subdomena dla odtwarzacza                |
 | Jakość chińskich modeli przy kodzie Strudel                                       | baza wiedzy + walidacja z autopoprawką + eval-models; fallback na OpenAI/Claude |
 | Długie i gęste MIDI dają ogromny kod w trybie faithful                            | limit taktów lub ścieżek z ostrzeżeniem; tryb essence jako zalecany             |
-| Sample i soundfonty ładowane z GitHuba                                            | działa od razu; lokalny mirror w PR 12                                          |
+| Sample i soundfonty ładowane z GitHuba                                            | działa od razu; lokalny mirror odłożony, gdyby GitHub zaczął przeszkadzać       |
 | Budżet OpenRouter (klucz z limitem 10 $/tydzień)                                  | limity w aplikacji: 3 $ na osobę i 10 $ na grupę tygodniowo                     |
 
 ---

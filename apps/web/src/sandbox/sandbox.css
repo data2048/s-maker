@@ -126,3 +126,18 @@ body {
   color: var(--sb-muted);
   font-variant-numeric: tabular-nums;
 }
+
+@media (max-width: 560px) {
+  .sb-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (pointer: coarse) {
+  .sb-btn {
+    min-height: 44px;
+  }
+  .sb-btn.icon {
+    min-width: 44px;
+  }
+}

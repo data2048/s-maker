@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestApp } from './helpers';
@@ -14,6 +15,9 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'index.html'), '<!doctype html><title>app</title>');
   writeFileSync(join(dir, 'sandbox.html'), '<!doctype html><title>player</title>');
   writeFileSync(join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
+  writeFileSync(join(dir, 'assets', 'big-abc123.js'), 'console.log(2)');
+  writeFileSync(join(dir, 'assets', 'big-abc123.js.gz'), gzipSync('console.log(2)'));
+  writeFileSync(join(dir, 'assets', 'big-abc123.js.br'), brotliCompressSync('console.log(2)'));
   ({ app } = await createTestApp({ webDist: dir }));
 });
 
@@ -23,6 +27,36 @@ afterAll(async () => {
 });
 
 describe('static files', () => {
+  it('sends the compressed file the browser accepts, with the same headers', async () => {
+    const br = await app.inject({
+      url: '/assets/big-abc123.js',
+      headers: { 'accept-encoding': 'gzip, br' },
+    });
+    expect(br.statusCode).toBe(200);
+    expect(br.headers['content-encoding']).toBe('br');
+    expect(br.headers['content-type']).toContain('javascript');
+    expect(String(br.headers.vary).toLowerCase()).toContain('accept-encoding');
+    expect(br.headers['access-control-allow-origin']).toBe('*');
+    expect(br.headers['cache-control']).toContain('immutable');
+
+    const gz = await app.inject({ url: '/assets/big-abc123.js', headers: { 'accept-encoding': 'gzip' } });
+    expect(gz.headers['content-encoding']).toBe('gzip');
+
+    const plain = await app.inject({
+      url: '/assets/big-abc123.js',
+      headers: { 'accept-encoding': 'identity' },
+    });
+    expect(plain.statusCode).toBe(200);
+    expect(plain.headers['content-encoding']).toBeUndefined();
+    expect(plain.body).toBe('console.log(2)');
+  });
+
+  it('keeps the player page sandboxed when the browser accepts compression', async () => {
+    const res = await app.inject({ url: '/sandbox.html', headers: { 'accept-encoding': 'gzip, br' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-security-policy']).toContain('sandbox allow-scripts');
+  });
+
   it('app pages get the strict CSP (no eval, no framing)', async () => {
     const res = await app.inject({ url: '/', headers: { accept: 'text/html' } });
     const csp = res.headers['content-security-policy'] as string;

@@ -1022,3 +1022,90 @@ label.btn.disabled {
   padding: 2px 8px;
   border: 1px solid rgba(127, 127, 127, 0.35);
 }
+
+/* ---------- export ---------- */
+
+.export-panel .btn {
+  align-self: flex-start;
+}
+
+/* ---------- phones ---------- */
+
+@media (max-width: 760px) {
+  /* The player comes first: on a phone you should not have to scroll past the mixer to press Play. */
+  .song-frame {
+    order: -1;
+  }
+  .song-grid > * {
+    min-width: 0;
+  }
+  /* One scrolling area at a time: a panel inside a scrolling page is hard to use with a finger. */
+  .song-grid .history,
+  .brief-fields {
+    max-height: none;
+    overflow: visible;
+  }
+  /* Room for the header, which stays on top. */
+  .song-grid .history {
+    scroll-margin-top: 110px;
+  }
+  .chat-log {
+    max-height: 50vh;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+  .nav a {
+    white-space: nowrap;
+  }
+  .row {
+    flex-wrap: wrap;
+  }
+  .row .spacer {
+    display: none;
+  }
+  .song-toolbar,
+  .agent-form {
+    flex-wrap: wrap;
+  }
+  /* Text fields get a line of their own instead of being squeezed between buttons. */
+  .song-toolbar .grow,
+  .agent-form .grow {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Fingers need bigger targets, and iOS zooms the whole page into text fields smaller than 16px. */
+  .btn,
+  button,
+  .nav a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  button {
+    min-width: 44px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    min-height: 44px;
+  }
+}

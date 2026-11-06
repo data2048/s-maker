@@ -11,6 +11,7 @@ import {
   toSandboxSchema,
   type EditorSettings,
   type FromSandbox,
+  type ToSandbox,
   isValidNote,
   parseTracks,
 } from '@s-maker/shared';
@@ -18,6 +19,7 @@ import { codemirrorSettings, StrudelMirror } from '@strudel/codemirror';
 import { getDrawContext } from '@strudel/draw';
 import { evaluate as evaluateCode, transpiler } from '@strudel/transpiler';
 import { getAudioContext, initAudioOnFirstClick, soundMap, webaudioOutput } from '@strudel/webaudio';
+import { exportAudio, exportMidi, withTempoStub } from './export';
 import { prebake } from './prebake';
 
 interface ReplState {
@@ -38,13 +40,26 @@ const fontSizeEl = $('font-size');
 const wrapBtn = $<HTMLButtonElement>('wrap');
 
 const embedded = window.parent !== window;
-function send(msg: FromSandbox): void {
+function send(msg: FromSandbox, transfer: Transferable[] = []): void {
   // The parent cannot be identified by origin from an opaque-origin frame, hence '*'.
-  // Only song code and player state are ever sent.
-  if (embedded) window.parent.postMessage(fromSandboxSchema.parse(msg), '*');
+  // Only song code, player state and exported files are ever sent.
+  if (embedded) window.parent.postMessage(fromSandboxSchema.parse(msg), '*', transfer);
 }
 
 initAudioOnFirstClick();
+
+let exporting = false;
+
+// Browsers start audio only from a user's action, and phones are strict about which one: Strudel listens only
+// for mousedown. The context can also be suspended later, for example by a phone call, so keep listening.
+function resumeAudio(): void {
+  if (exporting) return;
+  const context = getAudioContext();
+  if (context.state !== 'running') void context.resume().catch(() => {});
+}
+for (const event of ['pointerup', 'touchend', 'click', 'keydown']) {
+  document.addEventListener(event, resumeAudio, { capture: true, passive: true });
+}
 
 let lastCodeFromParent = '';
 let codeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -176,43 +191,65 @@ async function checkCode(code: string): Promise<string | null> {
   await (editor as { prebaked?: Promise<unknown> }).prebaked;
   const first = parsed.tracks[0];
   const header = first ? code.slice(0, first.range[0]) : code;
-  const scope = globalThis as unknown as Record<string, unknown>;
-  // Trying a song must not change the tempo of what is playing.
-  const saved = { setcpm: scope.setcpm, setcps: scope.setcps };
-  scope.setcpm = () => {};
-  scope.setcps = () => {};
   const sounds = soundMap.get() as Record<string, unknown>;
-  try {
-    for (const track of parsed.tracks) {
-      try {
-        const { pattern } = (await evaluateCode(`${header}\n${track.body}`)) as {
-          pattern: { queryArc(a: number, b: number): CheckHap[] };
-        };
-        const haps = pattern.queryArc(0, CHECK_CYCLES);
-        for (const hap of haps) {
-          const note = hap.value?.note;
-          if (note !== undefined && !isValidNote(note))
-            return `Track "${track.name}": invalid note "${String(note)}"`;
-          const s = hap.value?.s;
-          if (typeof s !== 'string') continue;
-          const name = (typeof hap.value?.bank === 'string' ? `${hap.value.bank}_${s}` : s).toLowerCase();
-          if (!sounds[name.split(':')[0]!]) return `Track "${track.name}": unknown sound "${name}"`;
+  // Trying a song must not change the tempo of what is playing.
+  return withTempoStub(
+    () => {},
+    async () => {
+      for (const track of parsed.tracks) {
+        try {
+          const { pattern } = (await evaluateCode(`${header}\n${track.body}`)) as {
+            pattern: { queryArc(a: number, b: number): CheckHap[] };
+          };
+          const haps = pattern.queryArc(0, CHECK_CYCLES);
+          for (const hap of haps) {
+            const note = hap.value?.note;
+            if (note !== undefined && !isValidNote(note))
+              return `Track "${track.name}": invalid note "${String(note)}"`;
+            const s = hap.value?.s;
+            if (typeof s !== 'string') continue;
+            const name = (typeof hap.value?.bank === 'string' ? `${hap.value.bank}_${s}` : s).toLowerCase();
+            if (!sounds[name.split(':')[0]!]) return `Track "${track.name}": unknown sound "${name}"`;
+          }
+          // A wrong scale name, for example, runs without an error and plays nothing.
+          if (
+            !haps.length &&
+            track.body.trim() !== 'silence' &&
+            !pattern.queryArc(0, CHECK_CYCLES_SILENT).length
+          )
+            return `Track "${track.name}" plays nothing. Check scale and chord names.`;
+        } catch (e) {
+          return `Track "${track.name}": ${e instanceof Error ? e.message : String(e)}`.slice(0, 1500);
         }
-        // A wrong scale name, for example, runs without an error and plays nothing.
-        if (
-          !haps.length &&
-          track.body.trim() !== 'silence' &&
-          !pattern.queryArc(0, CHECK_CYCLES_SILENT).length
-        )
-          return `Track "${track.name}" plays nothing. Check scale and chord names.`;
-      } catch (e) {
-        return `Track "${track.name}": ${e instanceof Error ? e.message : String(e)}`.slice(0, 1500);
       }
+      return null;
+    },
+  );
+}
+
+async function exportSong(msg: Extract<ToSandbox, { type: 'export' }>): Promise<void> {
+  const { id, code, format, bars } = msg;
+  if (exporting) {
+    send({ type: 'exported', id, error: 'Another export is still running.' });
+    return;
+  }
+  exporting = true;
+  try {
+    await editor.stop();
+    await (editor as { prebaked?: Promise<unknown> }).prebaked;
+    if (format === 'midi') {
+      send({ type: 'exported', id, error: null, midi: await exportMidi(code, bars) });
+    } else {
+      const bytes = await exportAudio(code, format, bars, (stage) =>
+        send({ type: 'exportProgress', id, stage }),
+      );
+      send({ type: 'exported', id, error: null, bytes }, [bytes]);
     }
-    return null;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    send({ type: 'exported', id, error: error.slice(0, 2000) || 'The export failed' });
   } finally {
-    scope.setcpm = saved.setcpm;
-    scope.setcps = saved.setcps;
+    exporting = false;
   }
 }
 
@@ -238,6 +275,9 @@ window.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'check':
       void checkCode(msg.code).then((error) => send({ type: 'checked', id: msg.id, error }));
+      break;
+    case 'export':
+      void exportSong(msg);
       break;
   }
 });

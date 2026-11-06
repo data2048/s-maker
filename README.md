@@ -12,6 +12,8 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap.
 - **MIDI import:** faithful (note for note) or essence (sections and loops), with a filled-in Music Brief.
 - **Agent:** commands for a track or section, a chat at the song, composing from a description or the
   14 musical elements, and explanations as `.md` files. You listen to every change before it is saved.
+- **Export:** MP3, WAV or MIDI, made in your browser and saved on your device.
+- **Phones:** the app fits small screens and plays by touch.
 - **Cost control:** weekly limits per person and for the group, and a spending overview for the admin.
 
 ## Development
@@ -78,3 +80,6 @@ container while no account exists prints a new one.
 
 [AGPL-3.0-or-later](LICENSE), like Strudel itself. If you host a modified version for others,
 you must offer them its source code.
+
+MP3 export uses [`@breezystack/lamejs`](https://www.npmjs.com/package/@breezystack/lamejs), a version of LAME
+under the LGPL-3.0.
