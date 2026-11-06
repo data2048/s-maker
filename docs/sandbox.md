@@ -8,8 +8,8 @@ read the session, call the API as the user, or change the page. So **song code n
 ```
 App page (https://music.example.com)              Player (sandbox.html, origin "null")
   cookies, API, React UI                            CodeMirror + Strudel + Web Audio
-        │   postMessage {setCode, play, stop}  ─►       │
-        │ ◄─  postMessage {ready, code, state}          │
+        │   postMessage {setCode, play, stop, check} ─► │
+        │ ◄─  postMessage {ready, code, state, checked} │
 ```
 
 - The player is an `<iframe sandbox="allow-scripts">` **without** `allow-same-origin`. The browser gives it an

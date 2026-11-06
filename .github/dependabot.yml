@@ -4,14 +4,31 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One pull request per kind of update, so that they do not conflict in the lockfile.
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+      major:
+        update-types: [major]
+    ignore:
+      # Types must match the Node.js version we run on, so they move together with the Dockerfile.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+      # typescript-eslint limits the TypeScript version: update them together, by hand.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # We stay on long-term support releases and choose when to move to the next one.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

@@ -59,12 +59,12 @@
 ┌──────────────────────── kontener s-maker (:44566) ─────────────────────────┐
 │  Fastify (Node, TypeScript)                                                │
 │   ├─ REST API  /api/*        (zod walidacja, sesje w cookie)               │
-│   ├─ WebSocket /ws           (czat, powiadomienia)                         │
+│   ├─ WebSocket /ws           (czat, powiadomienia; od PR 10)               │
 │   ├─ Agent service ──────────► OpenRouter (modele z konfiguracji)          │
 │   ├─ MIDI parser + analiza + konwerter (pakiet shared)                     │
 │   ├─ statyczny frontend (React + Vite)                                     │
 │   └─ /sandbox/  strona odtwarzacza Strudel                                 │
-│  SQLite (better-sqlite3 + Drizzle) ── wolumen /data (baza, uploady MIDI)   │
+│  SQLite (wbudowany node:sqlite) ── wolumen /data (baza, uploady MIDI)      │
 └────────────────────────────────────────────────────────────────────────────┘
 
 Przeglądarka:
@@ -76,19 +76,19 @@ Przeglądarka:
 
 ### Stack
 
-| Warstwa   | Wybór                                                                    | Dlaczego                                                |
-| --------- | ------------------------------------------------------------------------ | ------------------------------------------------------- |
-| Język     | TypeScript wszędzie                                                      | Strudel i biblioteki MIDI to JS; typy łapią błędy       |
-| Backend   | Fastify + `@fastify/websocket`, `@fastify/helmet`, `@fastify/rate-limit` | lekki, szybki, dojrzałe pluginy bezpieczeństwa          |
-| Baza      | SQLite + Drizzle ORM + migracje                                          | jeden plik, zero osobnego serwera, wystarcza dla 8 osób |
-| Walidacja | zod (wspólne schematy front/back)                                        | jedno źródło prawdy dla danych wejściowych              |
-| Frontend  | React + Vite + React Router + TanStack Query                             | najlepiej znany modelom i w dokumentacji                |
-| Edytor    | CodeMirror (`@strudel/codemirror`)                                       | natywne podświetlanie Strudela                          |
-| Audio     | `@strudel/web` / `@strudel/repl` + soundfonty GM                         | oficjalne pakiety                                       |
-| MIDI      | własny parser i zapis SMF (`packages/shared/src/midi`)                   | pełna kontrola limitów dla niezaufanych plików          |
-| Testy     | Vitest, Playwright (e2e w późniejszych PR)                               |                                                         |
-| Hasła     | argon2id                                                                 | rekomendacja OWASP                                      |
-| Markdown  | `marked` + DOMPurify                                                     | bezpieczne renderowanie wall, czatu i objaśnień         |
+| Warstwa   | Wybór                                                                   | Dlaczego                                                |
+| --------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| Język     | TypeScript wszędzie                                                     | Strudel i biblioteki MIDI to JS; typy łapią błędy       |
+| Backend   | Fastify + `@fastify/helmet`, `@fastify/rate-limit` (WebSocket od PR 10) | lekki, szybki, dojrzałe pluginy bezpieczeństwa          |
+| Baza      | SQLite przez `node:sqlite`, własne migracje, zwykłe zapytania SQL       | jeden plik, zero osobnego serwera, wystarcza dla 8 osób |
+| Walidacja | zod (wspólne schematy front/back)                                       | jedno źródło prawdy dla danych wejściowych              |
+| Frontend  | React + Vite + React Router                                             | najlepiej znany modelom i w dokumentacji                |
+| Edytor    | CodeMirror (`@strudel/codemirror`)                                      | natywne podświetlanie Strudela                          |
+| Audio     | `@strudel/webaudio`, `@strudel/core` i pokrewne + soundfonty GM         | oficjalne pakiety                                       |
+| MIDI      | własny parser i zapis SMF (`packages/shared/src/midi`)                  | pełna kontrola limitów dla niezaufanych plików          |
+| Testy     | Vitest, Playwright                                                      |                                                         |
+| Hasła     | argon2id                                                                | rekomendacja OWASP                                      |
+| Markdown  | `marked` + DOMPurify                                                    | bezpieczne renderowanie objaśnień, później walla        |
 
 ### Struktura repo (monorepo, npm workspaces)
 
@@ -101,9 +101,10 @@ s-maker/
 │  └─ shared/        # typy, schematy zod, MIDI→Strudel, walidator AST, mapy GM
 ├─ kb/               # baza wiedzy agenta (ściąga Strudel, mapa 14 elementów)
 ├─ scripts/          # build-strudel-kb.ts (Firecrawl), eval-models.ts
-├─ docs/             # PLAN.md, SECURITY.md, threat-model.md
+├─ docs/             # PLAN.md, sandbox.md
 ├─ Dockerfile
 ├─ deploy.sh
+├─ SECURITY.md
 └─ .env.example
 ```
 
@@ -113,7 +114,7 @@ s-maker/
 Udostępniony utwór kolegi lub kod od agenta to dowolny JS, a podatny na to jest m.in. prompt injection przez nazwy ścieżek w MIDI. Dlatego:
 
 - Odtwarzacz działa w `<iframe sandbox="allow-scripts">` **bez** `allow-same-origin`. Kod nie widzi cookies, nie może wołać API jako zalogowany użytkownik ani czytać strony aplikacji.
-- Komunikacja aplikacja ↔ odtwarzacz odbywa się przez `postMessage` z wąskim protokołem (`load`, `play`, `stop`, `error`, `validated`).
+- Komunikacja aplikacja ↔ odtwarzacz odbywa się przez `postMessage` z wąskim protokołem (do odtwarzacza: `setCode`, `play`, `stop`, `settings`, `check`; z odtwarzacza: `ready`, `code`, `state`, `command`, `settings`, `checked`).
 - **Walidator AST** (w `shared`): parsuje kod (acorn) i odrzuca niedozwolone konstrukcje (`fetch`, `window`, `document`, `import`, `eval`, `Function`, `constructor`, `__proto__`…). Dla kodu agenta to twarda reguła, dla kodu użytkownika ostrzeżenie. Mamy dwie warstwy obrony.
 - Serwer **nigdy** nie wykonuje kodu Strudel, więc nie ma ryzyka RCE.
 - Pierwszy krok PR 2 to spike: sprawdzenie, czy Strudel (audio, soundfonty, localStorage) działa w nieprzezroczystym originie. Wniosek trafia do `docs/`.
@@ -121,7 +122,7 @@ Udostępniony utwór kolegi lub kod od agenta to dowolny JS, a podatny na to jes
 **2. Model utworu**
 
 ```
-Song { id, ownerId, title, visibility: group|private, forkedFromId, brief: MusicBrief, currentVersionId }
+Song { id, ownerId, title, visibility: group|private, forkedFromSongId, brief: MusicBrief, currentVersionId }
 SongVersion { id, songId, number, parentVersionId, author: user|agent, message, code }
 ```
 
@@ -133,10 +134,11 @@ SongVersion { id, songId, number, parentVersionId, author: user|agent, message, 
 
 Dzięki temu edytor, mikser i odtwarzacz zawsze pokazują to samo, działa podświetlanie nut, a kod można skopiować 1:1 do strudel.cc.
 
-**3. Music Brief**: obiekt JSON z 14 elementami, globalnie i opcjonalnie per sekcja. Wypełniany:
+**3. Music Brief**: obiekt JSON z 14 elementami, jeden na utwór. Wypełniany:
 
 - formularzem lub rozmową, przy komponowaniu od zera;
-- automatycznie z analizy MIDI.
+- automatycznie z analizy MIDI;
+- przez agenta, gdy w czacie zapada decyzja albo gdy komponuje od zera.
 
 Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
@@ -146,7 +148,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
   - `MODEL_FAST`: tani chiński, do drobnych zmian ścieżek i klasyfikacji MIDI;
   - `MODEL_STRONG`: najmocniejszy chiński, do komponowania i dużych przeróbek;
   - `MODEL_FALLBACK`: model innego dostawcy, gdy pierwszy zawiedzie; później może OpenAI lub Claude.
-- Odpowiedź agenta to **strukturalny JSON** (`trackChanges[]`, `briefChanges`, `summary`), a nie wolny tekst.
+- Odpowiedź agenta to **strukturalny JSON** (`summary`, `changes[]`, `brief`, w czacie też `reply`), a nie wolny tekst. Wyjątek to objaśnienia: Markdown traktowany jako niezaufany.
 - Pętla walidacji:
   1. walidator AST;
   2. próbne wykonanie w piaskownicy u klienta (zapytanie o pierwsze N cykli);
@@ -176,7 +178,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 - **Klasyfikacja typu:**
   - kategorie: band pop/rock, solo piano, orkiestra/klasyka, elektronika/loop, jazz, chiptune/game, inne;
   - heurystyki: liczba ścieżek, perkusja, programy GM, gęstość, stabilność tempa;
-  - doprecyzowanie przez agenta (opcjonalne, tani model) i ręczna korekta.
+  - ręczna korekta (doprecyzowanie przez agenta można dodać później).
 - **Faithful:**
   - 1 cykl = 1 takt;
   - siatka kwantyzacji do wyboru (1/16, 1/32, wykrywanie trioli);
@@ -190,9 +192,9 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
 - `users`, `invites`, `sessions`, `audit_log`
 - `songs`, `song_versions`, `midi_uploads`, `song_explanations`
-- `agent_threads`, `agent_messages`, `agent_calls` (log kosztów), `cost_limits`
-- `chat_channels` (`general` | `dm`), `chat_members`, `chat_messages` (z opcjonalnym `songId`)
-- `wall_posts`, `wall_comments`
+- `agent_calls` (log kosztów), `agent_proposals`, `agent_chat_messages`; ustawienia agenta w `app_meta`
+- od PR 10: `chat_channels` (`general` | `dm`), `chat_members`, `chat_messages` (z opcjonalnym `songId`)
+- od PR 11: `wall_posts`, `wall_comments`
 
 ---
 
@@ -200,13 +202,15 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
 Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./deploy.sh <branch>`) → merge do `main`.
 
+**Stan (2026-11-06):** PR 0–8 scalone do `main`. Następny: PR 9. Zaległości są na końcu tej sekcji.
+
 ### Kamień milowy 1: działa i gra
 
 #### PR 0: Fundament
 
 - Monorepo (npm workspaces), TypeScript strict, ESLint + Prettier.
 - Fastify z `/health`; React + Vite serwowany przez serwer.
-- SQLite + Drizzle + system migracji (uruchamiane przy starcie).
+- SQLite + system migracji (uruchamiane przy starcie). Bez Drizzle: wbudowany `node:sqlite` wystarczył.
 - Dockerfile multi-stage: obraz `node:*-slim`, **użytkownik bez roota**, tylko `/data` zapisywalne.
 - `deploy.sh` v1, `.env.example`, `LICENSE` (AGPL-3.0), `README.md`, `SECURITY.md`.
 - GitHub Actions: lint, typecheck, test, build, `npm audit`; Dependabot.
@@ -331,24 +335,45 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 - Dopracowanie układu na telefon, odblokowanie audio na iOS, lżejsze ładowanie soundfontów.
 - Opcjonalnie: lokalny mirror sampli i soundfontów w kontenerze.
 
-Duże PR-y (4, 6, 7) mogą zostać podzielone na mniejsze w trakcie pracy.
+Duże PR-y mogą zostać podzielone na mniejsze w trakcie pracy.
+
+### Zaległości poza PR-ami
+
+Do sprawdzenia przez człowieka:
+
+- Odsłuch muzyki z agenta: test porównujący modele sprawdza, czy kod działa, a nie czy brzmi dobrze. Od tego zależy wybór `MODEL_STRONG`.
+- Import prawdziwych plików MIDI: dotąd testowany tylko na plikach generowanych.
+
+Do zrobienia w kodzie:
+
+- „Ask agent” bez strumienia: z mocnym modelem proxy o krótkim limicie czasu może uciąć odpowiedź. Czat i komponowanie mają heartbeat.
+- Zły akord (`BB maj7`) daje ciszę w takcie, a złe metrum (4 kroki w 3/4) gra dalej. Player tego nie wykrywa, modele dostają tylko wskazówki.
+- Koszt strumienia przerwanego przed ostatnim fragmentem nie trafia do logu, bo `usage` przychodzi na końcu.
+- Essence nie obsługuje przedtaktu.
+- `docs/threat-model.md` z sekcji 4 nie powstał.
+
+Zależności:
+
+- TypeScript 7: czeka, aż `typescript-eslint` go obsłuży (dziś wymaga `<6.1`). Aktualizacja ręczna.
+- Node.js i `@types/node`: zostajemy na 24 (LTS). Następne przejście na wersję LTS ręcznie, razem w `Dockerfile`, CI i `@types/node`.
+- `npm audit` zgłasza `minimatch` (moderate) w ESLint i `typescript-eslint`. Tylko narzędzia deweloperskie, na naszych własnych wzorcach plików, więc nie do wykorzystania z zewnątrz. `npm audit fix --force` obniżyłby ESLint, więc czekamy na ich aktualizację.
 
 ---
 
 ## 4. Bezpieczeństwo (OWASP Top 10) — checklista dla każdego PR
 
-| Kategoria                         | Środki w s-maker                                                                                                                                                                                 |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **A01 Broken Access Control**     | sprawdzanie właściciela i widoczności na serwerze dla każdego zasobu; deny-by-default; testy dostępu per endpoint                                                                                |
-| **A02 Cryptographic Failures**    | argon2id; tokeny zaproszeń i sesji losowe (CSPRNG), w bazie jako hash; sekrety tylko w `.env` na VPS; cookie `Secure`                                                                            |
-| **A03 Injection**                 | zapytania przez Drizzle (parametryzowane); zod na każdym wejściu; DOMPurify przy renderze markdown; kod Strudel tylko w piaskownicy + walidator AST; obrona przed prompt injection z danych MIDI |
-| **A04 Insecure Design**           | `docs/threat-model.md`; limity kosztów; jednorazowe, wygasające zaproszenia                                                                                                                      |
-| **A05 Security Misconfiguration** | helmet + restrykcyjne CSP; brak stack trace’ów w produkcji; kontener bez roota, read-only poza `/data`; `trustProxy` tylko dla proxy                                                             |
-| **A06 Vulnerable Components**     | lockfile + `npm ci`; `npm audit` w CI; Dependabot                                                                                                                                                |
-| **A07 Auth Failures**             | rate limiting i opóźnianie logowań; rotacja sesji; wygasanie sesji; minimalna długość hasła i sprawdzanie popularnych haseł                                                                      |
-| **A08 Integrity Failures**        | build z lockfile; CI przed merge; obrazy tagowane hashem commita                                                                                                                                 |
-| **A09 Logging & Monitoring**      | audit log (logowania, akcje admina, wywołania agenta), bez haseł i tokenów w logach                                                                                                              |
-| **A10 SSRF**                      | serwer nie pobiera URL-i od użytkowników; Firecrawl tylko w skrypcie budującym bazę wiedzy                                                                                                       |
+| Kategoria                         | Środki w s-maker                                                                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A01 Broken Access Control**     | sprawdzanie właściciela i widoczności na serwerze dla każdego zasobu; deny-by-default; testy dostępu per endpoint                                                                |
+| **A02 Cryptographic Failures**    | argon2id; tokeny zaproszeń i sesji losowe (CSPRNG), w bazie jako hash; sekrety tylko w `.env` na VPS; cookie `Secure`                                                            |
+| **A03 Injection**                 | zapytania parametryzowane; zod na każdym wejściu; DOMPurify przy renderze markdown; kod Strudel tylko w piaskownicy + walidator AST; obrona przed prompt injection z danych MIDI |
+| **A04 Insecure Design**           | model zagrożeń (do napisania); limity kosztów; jednorazowe, wygasające zaproszenia                                                                                               |
+| **A05 Security Misconfiguration** | helmet + restrykcyjne CSP; brak stack trace’ów w produkcji; kontener bez roota, read-only poza `/data`; `trustProxy` tylko dla proxy                                             |
+| **A06 Vulnerable Components**     | lockfile + `npm ci`; `npm audit` w CI; Dependabot                                                                                                                                |
+| **A07 Auth Failures**             | rate limiting i opóźnianie logowań; rotacja sesji; wygasanie sesji; minimalna długość hasła i sprawdzanie popularnych haseł                                                      |
+| **A08 Integrity Failures**        | build z lockfile; CI przed merge; obrazy tagowane hashem commita                                                                                                                 |
+| **A09 Logging & Monitoring**      | audit log (logowania, akcje admina, wywołania agenta), bez haseł i tokenów w logach                                                                                              |
+| **A10 SSRF**                      | serwer nie pobiera URL-i od użytkowników; Firecrawl tylko w skrypcie budującym bazę wiedzy                                                                                       |
 
 Dodatkowo:
 
@@ -384,13 +409,13 @@ Każdy PR dopisuje do skryptu i `.env.example` to, czego potrzebuje (nowe zmienn
 | Jakość chińskich modeli przy kodzie Strudel                                       | baza wiedzy + walidacja z autopoprawką + eval-models; fallback na OpenAI/Claude |
 | Długie i gęste MIDI dają ogromny kod w trybie faithful                            | limit taktów lub ścieżek z ostrzeżeniem; tryb essence jako zalecany             |
 | Sample i soundfonty ładowane z GitHuba                                            | działa od razu; lokalny mirror w PR 12                                          |
-| Budżet OpenRouter (obecnie 2 $/tydzień)                                           | nowy klucz ~10–15 $/tydzień + limity w aplikacji                                |
+| Budżet OpenRouter (klucz z limitem 10 $/tydzień)                                  | limity w aplikacji: 3 $ na osobę i 10 $ na grupę tygodniowo                     |
 
 ---
 
 ## 7. Do przygotowania po twojej stronie
 
-- [ ] Nowy klucz OpenRouter z limitem ~10–15 $/tydzień.
-- [ ] Klucz Firecrawl (potrzebny w PR 6).
-- [ ] Na VPS: Docker, git, katalog na aplikację; informacja, czy reverse proxy działa na tym samym hoście (wtedy bind `127.0.0.1:44566`).
-- [ ] Domena/subdomena skierowana na proxy → `:44566`.
+- [x] Klucz OpenRouter z limitem 10 $/tydzień.
+- [x] Klucz Firecrawl (tylko lokalnie, do budowy bazy wiedzy).
+- [x] Na VPS: Docker, git, katalog na aplikację, `BIND_ADDRESS=0.0.0.0`.
+- [x] Domena `https://s-maker.cytr.us` skierowana na `:44566`.
