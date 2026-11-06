@@ -290,6 +290,7 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 - Wątek czatu przy utworze (historia, streaming odpowiedzi).
 - Kreator nowego utworu: formularz 14 elementów i/lub rozmowa → Music Brief → pierwsza wersja.
 - Praca na sekcjach (zwrotka, refren…) i budowa formy przez `arrange`.
+- Decyzje: każda osoba ma własną rozmowę o utworze; zmiana z czatu to ta sama propozycja co z polecenia (sprawdzenie w playerze, diff, akceptacja, nowa wersja); utwór z kreatora powstaje jako prywatny, a jego pierwsza wersja czeka na akceptację.
 - **Test:** tworzysz utwór od zera z opisu, iterujesz w czacie, każda zmiana to nowa wersja.
 
 #### PR 8: Objaśnienie `.md`

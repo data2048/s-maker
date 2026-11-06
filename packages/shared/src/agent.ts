@@ -1,6 +1,6 @@
 // The agent: request and answer formats, and applying its changes to song code.
 import { z } from 'zod';
-import { musicBriefSchema, type MusicBrief } from './brief';
+import { isBriefEmpty, musicBriefSchema, type MusicBrief } from './brief';
 import { addTrack, parseTracks, removeTrack, sanitizeTrackName, setTrackBody } from './strudel/tracks';
 import { MAX_CODE_LENGTH } from './strudel/validate';
 
@@ -26,12 +26,65 @@ export const agentChangeSchema = z.discriminatedUnion('type', [
 ]);
 export type AgentChange = z.infer<typeof agentChangeSchema>;
 
-export const agentAnswerSchema = z.object({
-  summary: z.string().trim().min(1).max(400),
-  changes: z.array(agentChangeSchema).max(64),
-  brief: musicBriefSchema.optional(),
-});
+/** In a chat the model writes a reply, and may change nothing at all. */
+function withChatDefaults(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const { reply } = value as { reply?: unknown };
+  if (typeof reply !== 'string') return value;
+  return { summary: reply.slice(0, 400), changes: [], ...value };
+}
+
+export const agentAnswerSchema = z.preprocess(
+  withChatDefaults,
+  z.object({
+    reply: z.string().trim().min(1).max(4000).optional(),
+    /** A name for a song written from nothing. */
+    title: z.string().trim().min(1).max(100).optional(),
+    summary: z.string().trim().min(1).max(400),
+    changes: z.array(agentChangeSchema).max(64),
+    brief: musicBriefSchema.optional(),
+  }),
+);
 export type AgentAnswer = z.infer<typeof agentAnswerSchema>;
+
+/**
+ * The text so far of a string field in a JSON answer that is still arriving,
+ * so that a reply can be shown while the rest of the answer is being written.
+ */
+export function partialJsonString(json: string, key: string): string | null {
+  const start = new RegExp(`"${key}"\\s*:\\s*"`).exec(json);
+  if (!start) return null;
+  const simple: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f' };
+  let out = '';
+  for (let i = start.index + start[0].length; i < json.length; i++) {
+    const c = json[i]!;
+    if (c === '"') return out;
+    if (c !== '\\') {
+      out += c;
+      continue;
+    }
+    const next = json[i + 1];
+    if (next === undefined) return out;
+    if (next === 'u') {
+      const hex = json.slice(i + 2, i + 6);
+      if (hex.length < 4) return out;
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+    } else {
+      out += simple[next] ?? next;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** Sections of a song: the const declarations above the first track. */
+export function listSections(songCode: string): string[] {
+  const parsed = parseTracks(songCode);
+  const first = parsed.tracks[0];
+  const header = first ? songCode.slice(0, first.range[0]) : songCode;
+  return [...header.matchAll(/^\s*const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=/gm)].map((m) => m[1]!);
+}
 
 /** Models tend to wrap JSON in a code fence or add a sentence around it. */
 export function extractJson(text: string): unknown {
@@ -86,6 +139,8 @@ export const agentProposeRequestSchema = z.object({
   instruction: z.string().trim().min(1, 'Write what the agent should do').max(MAX_INSTRUCTION_LENGTH),
   /** Limit the change to this track. */
   track: trackName.optional(),
+  /** Limit the change to this section, a const in the header. */
+  section: trackName.optional(),
   tier: z.enum(MODEL_TIERS).default('fast'),
   /** The code in the editor, which may have unsaved edits. */
   code: z.string().max(MAX_AGENT_CODE_LENGTH, 'This song is too long for the agent'),
@@ -112,6 +167,58 @@ export interface AgentProposalDto {
   model: string;
   costUsd: number;
 }
+
+export const agentChatRequestSchema = z.object({
+  message: z.string().trim().min(1, 'Write a message').max(MAX_INSTRUCTION_LENGTH),
+  tier: z.enum(MODEL_TIERS).default('fast'),
+  /** The code in the editor, which may have unsaved edits. */
+  code: z.string().max(MAX_AGENT_CODE_LENGTH, 'This song is too long for the agent'),
+  baseVersionId: z.number().int().positive(),
+});
+export type AgentChatRequest = z.input<typeof agentChatRequestSchema>;
+
+export const composeRequestSchema = z
+  .object({
+    title: z.string().trim().max(100).optional(),
+    description: z.string().trim().max(MAX_INSTRUCTION_LENGTH).default(''),
+    brief: musicBriefSchema.default({}),
+    tier: z.enum(MODEL_TIERS).default('strong'),
+  })
+  .refine((r) => r.description || !isBriefEmpty(r.brief), {
+    message: 'Describe the song or fill in at least one element',
+  });
+export type ComposeRequest = z.input<typeof composeRequestSchema>;
+
+export interface AgentChatMessageDto {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  at: string;
+  proposalId: number | null;
+  proposalStatus: AgentProposalDto['status'] | null;
+}
+
+export interface AgentChatDto {
+  messages: AgentChatMessageDto[];
+  /** A change still waiting to be accepted or rejected. */
+  pending: AgentProposalDto | null;
+}
+
+/** One line of the streamed answer. */
+export type AgentStreamEvent =
+  | { type: 'status'; text: string }
+  /** More of the reply. */
+  | { type: 'delta'; text: string }
+  /** The model started over: forget the reply so far. */
+  | { type: 'reset' }
+  | {
+      type: 'done';
+      message?: AgentChatMessageDto;
+      proposal?: AgentProposalDto | null;
+      brief?: MusicBrief | null;
+      songId?: number;
+    }
+  | { type: 'error'; error: string };
 
 export interface AgentUsageDto {
   enabled: boolean;

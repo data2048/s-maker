@@ -1,112 +1,63 @@
 import { diffLines, type AgentProposalDto, type AgentUsageDto, type ModelTier } from '@s-maker/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
+import type { AgentProposalState } from './useAgentProposal';
 
 interface Props {
   songId: number;
   code: string;
   baseVersionId: number;
   trackNames: string[];
+  sectionNames: string[];
   /** Asked for from the mixer: limit the change to this track. */
   focusTrack: string | null;
   onFocusTrack(track: string | null): void;
-  /** Tries code in the sandboxed player without playing it. Returns the problem, or null. */
-  checkCode(code: string): Promise<string | null>;
-  /** Puts code in the editor for listening. */
-  onListen(code: string): void;
-  onAccepted(result: { songCode: string; versionId: number }): void;
-  /** Called after a rejection so the editor can go back to the code before the proposal. */
-  onRejected(baseCode: string): void;
+  agent: AgentProposalState;
 }
+
+const SECTION_PREFIX = 'section:';
 
 export const money = (usd: number) => (usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`);
 
 /** Gives the agent an instruction and shows its proposal as a diff to accept or reject. */
 export function AgentPanel(props: Props) {
-  const { songId, code, baseVersionId, trackNames, focusTrack, checkCode } = props;
+  const { songId, code, baseVersionId, trackNames, sectionNames, focusTrack, agent } = props;
+  const { proposal, busy, error, spent } = agent;
   const [usage, setUsage] = useState<AgentUsageDto | null>(null);
   const [instruction, setInstruction] = useState('');
   const [tier, setTier] = useState<ModelTier>('fast');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [proposal, setProposal] = useState<AgentProposalDto | null>(null);
 
   const loadUsage = useCallback(() => {
     api<AgentUsageDto>('GET', '/api/agent/usage')
       .then(setUsage)
       .catch(() => {});
   }, []);
-  useEffect(loadUsage, [loadUsage]);
-
-  /** Tries the proposal in the player and lets the model fix what fails there. */
-  const tryInPlayer = async (start: AgentProposalDto): Promise<AgentProposalDto> => {
-    let current = start;
-    for (let i = current.repairs; i < 2; i++) {
-      setBusy('Trying it in the player…');
-      const problem = await checkCode(current.code);
-      if (!problem) return current;
-      setBusy('Fixing an error…');
-      current = await api<AgentProposalDto>(
-        'POST',
-        `/api/songs/${songId}/agent/proposals/${current.id}/repair`,
-        { error: problem },
-      );
-    }
-    const problem = await checkCode(current.code);
-    if (problem) setError(`This proposal may not play correctly: ${problem}`);
-    return current;
-  };
+  useEffect(loadUsage, [loadUsage, spent]);
 
   const ask = async () => {
     if (!instruction.trim() || busy) return;
-    setError(null);
-    setProposal(null);
-    setBusy('The agent is working…');
+    agent.setError(null);
+    agent.setBusy('The agent is working…');
+    const scope = focusTrack?.startsWith(SECTION_PREFIX)
+      ? { section: focusTrack.slice(SECTION_PREFIX.length) }
+      : focusTrack
+        ? { track: focusTrack }
+        : {};
     try {
       const first = await api<AgentProposalDto>('POST', `/api/songs/${songId}/agent/proposals`, {
         instruction,
         tier,
         code,
         baseVersionId,
-        ...(focusTrack ? { track: focusTrack } : {}),
+        ...scope,
       });
-      const checked = await tryInPlayer(first);
-      setProposal(checked);
       setInstruction('');
-      props.onListen(checked.code);
+      await agent.present(first);
     } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(null);
+      agent.setError(errorMessage(e));
+      agent.setBusy(null);
       loadUsage();
     }
-  };
-
-  const accept = async () => {
-    if (!proposal) return;
-    setBusy('Saving…');
-    setError(null);
-    try {
-      const r = await api<{ version: { id: number; code: string } }>(
-        'POST',
-        `/api/songs/${songId}/agent/proposals/${proposal.id}/accept`,
-      );
-      props.onAccepted({ songCode: r.version.code, versionId: r.version.id });
-      setProposal(null);
-      props.onFocusTrack(null);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const reject = async () => {
-    if (!proposal) return;
-    const base = proposal.baseCode;
-    setProposal(null);
-    props.onRejected(base);
-    await api('POST', `/api/songs/${songId}/agent/proposals/${proposal.id}/reject`).catch(() => {});
   };
 
   const diff = useMemo(
@@ -139,6 +90,11 @@ export function AgentPanel(props: Props) {
           {trackNames.map((t) => (
             <option key={t} value={t}>
               Track: {t}
+            </option>
+          ))}
+          {sectionNames.map((s) => (
+            <option key={s} value={`${SECTION_PREFIX}${s}`}>
+              Section: {s}
             </option>
           ))}
         </select>
@@ -179,10 +135,17 @@ export function AgentPanel(props: Props) {
             <span className="muted small">
               {proposal.model} · {money(proposal.costUsd)}
             </span>
-            <button className="btn small primary" onClick={() => void accept()} disabled={!!busy}>
+            <button
+              className="btn small primary"
+              onClick={() => {
+                void agent.accept();
+                props.onFocusTrack(null);
+              }}
+              disabled={!!busy}
+            >
               Accept
             </button>
-            <button className="btn small" onClick={() => void reject()} disabled={!!busy}>
+            <button className="btn small" onClick={() => void agent.reject()} disabled={!!busy}>
               Reject
             </button>
           </div>

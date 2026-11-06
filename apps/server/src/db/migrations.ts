@@ -168,4 +168,20 @@ export const migrations: Migration[] = [
       CREATE INDEX agent_proposals_song ON agent_proposals(song_id, id);
     `,
   },
+  {
+    id: 6,
+    name: 'agent chat',
+    sql: `
+      CREATE TABLE agent_chat_messages (
+        id INTEGER PRIMARY KEY,
+        song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        proposal_id INTEGER REFERENCES agent_proposals(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX agent_chat_song ON agent_chat_messages(song_id, user_id, id);
+    `,
+  },
 ];

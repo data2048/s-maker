@@ -44,6 +44,11 @@ export function systemPrompt(): string {
 - Include "brief" only for elements of the Music Brief that your change makes out of date.
 - Use an empty "changes" list only if the request is impossible, and say why in the summary.
 
+# Sections and form
+- A section is a const in the header, one per track and section: verse_drums, verse_bass, chorus_drums.
+- Build the form in each track with arrange: drums: arrange([8, verse_drums], [8, chorus_drums]).
+- The lengths in arrange must add up to the same total in every track. Use silence for a track that rests.
+
 ${readFileSync(join(dir, 'music-elements.md'), 'utf8')}
 
 ${readFileSync(join(dir, 'strudel-cheatsheet.md'), 'utf8')}`;
@@ -72,10 +77,13 @@ export function proposeMessages(input: {
   brief: MusicBrief | null;
   instruction: string;
   track?: string;
+  section?: string;
 }): ChatMessage[] {
   const scope = input.track
     ? `\nChange only the track "${input.track}" (and const declarations it uses). Other tracks stay as they are.`
-    : '';
+    : input.section
+      ? `\nChange only the section "${input.section}", a const in the header. Give the whole header with this one const changed. Tracks stay as they are.`
+      : '';
   return [
     { role: 'system', content: systemPrompt() },
     {
@@ -84,6 +92,73 @@ export function proposeMessages(input: {
 
 # REQUEST
 ${input.instruction}${scope}`,
+    },
+  ];
+}
+
+const HISTORY_MESSAGES = 12;
+const HISTORY_CHARS = 8000;
+
+/** The latest messages that fit. Only the last message carries the song, to keep this cheap. */
+function recentHistory(history: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  let chars = 0;
+  for (const m of history.slice(-HISTORY_MESSAGES).reverse()) {
+    chars += m.content.length;
+    if (chars > HISTORY_CHARS) break;
+    out.unshift(m);
+  }
+  return out;
+}
+
+export function chatMessages(input: {
+  code: string;
+  brief: MusicBrief | null;
+  message: string;
+  history: ChatMessage[];
+}): ChatMessage[] {
+  return [
+    { role: 'system', content: systemPrompt() },
+    ...recentHistory(input.history),
+    {
+      role: 'user',
+      content: `${songMessage(input.code, input.brief)}
+
+# CHAT
+This is a conversation about the song. Answer with one JSON object, with "reply" first:
+{ "reply": "...", "summary": "...", "changes": [], "brief": {} }
+- "reply" is your message to the user, in the language of the REQUEST section below, even if earlier messages used another language. Keep it short. Answer questions directly. If you change the song, say in one sentence what changed, and explain why only when asked.
+- If the user asks for a change, give it in "changes". If the user is asking something or still deciding, leave "changes" empty.
+- When the user decides something new about the music, put only those elements in "brief", using the element names from the Music Brief. For a question, leave "brief" out.
+- "summary" is one short sentence for the version history. Leave it out when nothing changes.
+
+# REQUEST
+${input.message}`,
+    },
+  ];
+}
+
+export function composeMessages(input: { description: string; brief: MusicBrief }): ChatMessage[] {
+  return [
+    { role: 'system', content: systemPrompt() },
+    {
+      role: 'user',
+      content: `# Music Brief (data)
+<brief>
+${briefText(input.brief)}
+</brief>
+
+# Description (data)
+<description>
+${input.description || '(none)'}
+</description>
+
+# COMPOSE
+Write a new song from nothing, following the description and the Music Brief. Decide everything they leave open.
+- Give a "header" change with setcpm and any const declarations, and one "add" change for each track.
+- Add "title": a short name for the song, in the language of the description.
+- In "brief", fill in all 14 elements with what you decided.
+- Unless asked for something else, write a complete short piece with a form, using sections and arrange.`,
     },
   ];
 }

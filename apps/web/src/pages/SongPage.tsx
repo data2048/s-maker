@@ -1,5 +1,7 @@
 import {
+  listSections,
   parseTracks,
+  type AgentChatDto,
   type MusicBrief,
   type SongDto,
   type VersionDto,
@@ -7,14 +9,16 @@ import {
   type Visibility,
 } from '@s-maker/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../api';
 import { AgentPanel } from '../components/AgentPanel';
 import { BriefPanel } from '../components/BriefPanel';
+import { ChatPanel } from '../components/ChatPanel';
 import { ErrorBox } from '../components/Form';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { Mixer } from '../components/Mixer';
 import { StrudelPlayer, type PlayerState, type StrudelPlayerHandle } from '../components/StrudelPlayer';
+import { useAgentProposal } from '../components/useAgentProposal';
 
 interface Draft {
   baseVersionId: number;
@@ -35,6 +39,7 @@ export function SongPage() {
   const { id } = useParams();
   const songId = Number(id);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const player = useRef<StrudelPlayerHandle>(null);
 
   const [song, setSong] = useState<SongDto | null>(null);
@@ -53,14 +58,16 @@ export function SongPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showBrief, setShowBrief] = useState(false);
+  const [panel, setPanel] = useState<'history' | 'brief' | 'chat' | null>(
+    searchParams.get('chat') ? 'chat' : null,
+  );
   const [agentTrack, setAgentTrack] = useState<string | null>(null);
   const [title, setTitle] = useState('');
 
   const dirty = code !== savedCode;
   const canEdit = song?.canEdit ?? false;
   const parsed = useMemo(() => parseTracks(code), [code]);
+  const sectionNames = useMemo(() => listSections(code), [code]);
 
   const applyLoaded = useCallback((s: SongDto) => {
     setSong(s);
@@ -144,6 +151,29 @@ export function SongPage() {
     setTimeout(() => setNotice(null), 2500);
   };
 
+  const checkInPlayer = useCallback((c: string) => player.current?.check(c) ?? Promise.resolve(null), []);
+  const agent = useAgentProposal({
+    songId,
+    checkCode: checkInPlayer,
+    onListen: (c) => replaceCode(c),
+    onAccepted: (r) => void agentAccepted(r),
+    onRejected: (c) => replaceCode(c),
+  });
+
+  // A change that nobody answered yet, such as the first version of a composed song.
+  const present = useRef(agent.present);
+  present.current = agent.present;
+  const loadedPending = useRef<number | null>(null);
+  useEffect(() => {
+    if (!canEdit || !playerState.ready || !song || loadedPending.current === song.id) return;
+    loadedPending.current = song.id;
+    api<AgentChatDto>('GET', `/api/songs/${song.id}/agent/chat`)
+      .then((r) => {
+        if (r.pending) void present.current(r.pending);
+      })
+      .catch(() => {});
+  }, [canEdit, playerState.ready, song]);
+
   const saveRef = useRef(save);
   saveRef.current = save;
 
@@ -178,7 +208,7 @@ export function SongPage() {
     if (!song) return;
     try {
       const copy = await api<SongDto>('POST', `/api/songs/${song.id}/fork`, versionId ? { versionId } : {});
-      setShowHistory(false);
+      setPanel(null);
       // The page reloads the song when the id in the URL changes.
       navigate(`/songs/${copy.id}`);
     } catch (e) {
@@ -281,23 +311,26 @@ export function SongPage() {
             </button>
           </>
         )}
+        {canEdit && (
+          <button
+            className="btn"
+            onClick={() => setPanel((p) => (p === 'chat' ? null : 'chat'))}
+            aria-pressed={panel === 'chat'}
+          >
+            Chat
+          </button>
+        )}
         <button
           className="btn"
-          onClick={() => {
-            setShowBrief((b) => !b);
-            setShowHistory(false);
-          }}
-          aria-pressed={showBrief}
+          onClick={() => setPanel((p) => (p === 'brief' ? null : 'brief'))}
+          aria-pressed={panel === 'brief'}
         >
           Brief
         </button>
         <button
           className="btn"
-          onClick={() => {
-            setShowHistory((h) => !h);
-            setShowBrief(false);
-          }}
-          aria-pressed={showHistory}
+          onClick={() => setPanel((p) => (p === 'history' ? null : 'history'))}
+          aria-pressed={panel === 'history'}
         >
           History ({song.versionCount})
         </button>
@@ -340,16 +373,14 @@ export function SongPage() {
           code={code}
           baseVersionId={baseVersionId}
           trackNames={parsed.tracks.map((t) => t.name)}
+          sectionNames={sectionNames}
           focusTrack={agentTrack}
           onFocusTrack={setAgentTrack}
-          checkCode={(c) => player.current?.check(c) ?? Promise.resolve(null)}
-          onListen={replaceCode}
-          onAccepted={(r) => void agentAccepted(r)}
-          onRejected={replaceCode}
+          agent={agent}
         />
       )}
 
-      <div className={`song-grid ${showHistory || showBrief ? 'with-history' : ''}`}>
+      <div className={`song-grid ${panel ? 'with-history' : ''}`}>
         <Mixer
           parsed={parsed}
           code={code}
@@ -365,16 +396,26 @@ export function SongPage() {
           onSave={() => void saveRef.current()}
           className="strudel-frame song-frame"
         />
-        {showBrief && (
+        {panel === 'chat' && canEdit && (
+          <ChatPanel
+            songId={song.id}
+            code={code}
+            baseVersionId={baseVersionId}
+            agent={agent}
+            onBriefChanged={(brief) => setSong({ ...song, brief })}
+            onClose={() => setPanel(null)}
+          />
+        )}
+        {panel === 'brief' && (
           <BriefPanel
-            key={song.id}
+            key={JSON.stringify(song.brief)}
             brief={song.brief}
             canEdit={canEdit}
             onSave={(brief) => updateMeta({ brief })}
-            onClose={() => setShowBrief(false)}
+            onClose={() => setPanel(null)}
           />
         )}
-        {showHistory && (
+        {panel === 'history' && (
           <HistoryPanel
             songId={song.id}
             currentVersionId={song.currentVersion.id}
@@ -384,7 +425,7 @@ export function SongPage() {
             onLoadIntoEditor={replaceCode}
             onRestore={(v) => void restore(v)}
             onFork={(v) => void fork(v.id)}
-            onClose={() => setShowHistory(false)}
+            onClose={() => setPanel(null)}
           />
         )}
       </div>

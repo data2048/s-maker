@@ -1,24 +1,30 @@
+import { PassThrough } from 'node:stream';
 import {
+  agentChatRequestSchema,
   agentProposeRequestSchema,
   agentRepairRequestSchema,
   agentSettingsSchema,
+  composeRequestSchema,
+  partialJsonString,
   type AgentAdminDto,
+  type AgentChatDto,
   type AgentProposalDto,
+  type AgentStreamEvent,
   type AgentUsageDto,
   type ModelTier,
   type MusicBrief,
   type SongDto,
   type VersionDto,
 } from '@s-maker/shared';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { currentUser, requireAdmin, requireUser } from '../auth/plugin';
 import { audit } from '../auth/store';
 import { badRequest, conflict, forbidden, HttpError, notFound, parse } from '../http-error';
 import { canEdit, canView, songs, versions } from '../songs/store';
-import { proposeMessages, repairMessage } from './prompt';
+import { chatMessages, composeMessages, proposeMessages, repairMessage } from './prompt';
 import { runAgent } from './service';
-import { agentCalls, agentSettings, proposalDto, proposals } from './store';
+import { agentCalls, agentChat, agentSettings, proposalDto, proposals } from './store';
 
 const songParams = z.object({ id: z.coerce.number().int().positive() });
 const proposalParams = songParams.extend({ proposalId: z.coerce.number().int().positive() });
@@ -48,6 +54,65 @@ export async function oneAtATime<T>(userId: number, fn: () => Promise<T>): Promi
   }
 }
 
+/** The empty song that a composition starts from. */
+const COMPOSE_BASE_CODE = 'setcpm(120/4)\n';
+
+/** How often a long wait says it is still alive, so that proxies do not close the connection. */
+const HEARTBEAT_MS = 10_000;
+
+/**
+ * Answers with one JSON object per line while the work runs. Problems found before this point are ordinary
+ * HTTP errors; later ones are 'error' events. Closing the connection cancels the model call.
+ */
+function streamEvents(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  work: (send: (event: AgentStreamEvent) => void, signal: AbortSignal) => Promise<void>,
+): FastifyReply {
+  const stream = new PassThrough();
+  const abort = new AbortController();
+  const send = (event: AgentStreamEvent) => {
+    if (!stream.writableEnded) stream.write(`${JSON.stringify(event)}\n`);
+  };
+  reply.raw.on('close', () => {
+    if (!reply.raw.writableFinished) abort.abort();
+  });
+  const heartbeat = setInterval(() => send({ type: 'status', text: 'The agent is working…' }), HEARTBEAT_MS);
+  work(send, abort.signal)
+    .catch((e: unknown) => {
+      if (e instanceof HttpError) send({ type: 'error', error: e.message });
+      else {
+        request.log.error(e);
+        send({ type: 'error', error: 'Something went wrong' });
+      }
+    })
+    .finally(() => {
+      clearInterval(heartbeat);
+      stream.end();
+    });
+  return reply
+    .type('application/x-ndjson')
+    .header('Cache-Control', 'no-store')
+    .header('X-Accel-Buffering', 'no')
+    .send(stream);
+}
+
+/** Sends the "reply" field of a JSON answer as it arrives. */
+function replyStreamer(send: (event: AgentStreamEvent) => void) {
+  let sent = '';
+  return (textSoFar: string) => {
+    const text = partialJsonString(textSoFar, 'reply') ?? '';
+    if (text.startsWith(sent)) {
+      if (text.length > sent.length) send({ type: 'delta', text: text.slice(sent.length) });
+    } else {
+      // Another attempt began.
+      send({ type: 'reset' });
+      if (text) send({ type: 'delta', text });
+    }
+    sent = text;
+  };
+}
+
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   const { db } = app;
   app.addHook('preHandler', requireUser);
@@ -74,10 +139,12 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
               brief: parseBrief(song.brief),
               instruction: body.instruction,
               ...(body.track ? { track: body.track } : {}),
+              ...(body.section ? { section: body.section } : {}),
             }),
           },
         ),
       );
+      proposals.closePending(db, song.id, user.id);
       const row = proposals.create(db, {
         songId: song.id,
         userId: user.id,
@@ -96,6 +163,139 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       return proposalDto(row);
     },
   );
+
+  app.get('/api/songs/:id/agent/chat', async (request): Promise<AgentChatDto> => {
+    const { id } = parse(songParams, request.params);
+    const { song, user } = ownSong(request, id);
+    const pending = proposals.pending(db, song.id, user.id);
+    return {
+      messages: agentChat.list(db, song.id, user.id),
+      pending: pending ? proposalDto(pending) : null,
+    };
+  });
+
+  /** A message in the chat. A change comes back as an ordinary proposal to try, accept or reject. */
+  app.post('/api/songs/:id/agent/chat', { config: agentRateLimit }, async (request, reply) => {
+    const { id } = parse(songParams, request.params);
+    const { song, user } = ownSong(request, id);
+    const body = parse(agentChatRequestSchema, request.body);
+    return streamEvents(request, reply, (send, signal) =>
+      oneAtATime(user.id, async () => {
+        send({ type: 'status', text: 'The agent is working…' });
+        const history = agentChat
+          .list(db, song.id, user.id, 12)
+          .map((m) => ({ role: m.role, content: m.content }));
+        const brief = parseBrief(song.brief);
+        agentChat.add(db, { songId: song.id, userId: user.id, role: 'user', content: body.message });
+        const result = await runAgent(
+          { app, userId: user.id, songId: song.id, purpose: 'chat' },
+          {
+            baseCode: body.code,
+            tier: body.tier,
+            messages: chatMessages({ code: body.code, brief, message: body.message, history }),
+            onText: replyStreamer(send),
+            signal,
+          },
+        );
+        let proposal: AgentProposalDto | null = null;
+        let newBrief = null;
+        if (result.code !== body.code) {
+          proposals.closePending(db, song.id, user.id);
+          proposal = proposalDto(
+            proposals.create(db, {
+              songId: song.id,
+              userId: user.id,
+              baseVersionId: body.baseVersionId,
+              instruction: body.message,
+              track: null,
+              tier: body.tier,
+              summary: result.answer.summary,
+              baseCode: body.code,
+              code: result.code,
+              brief: result.answer.brief ?? null,
+              model: result.model,
+              costUsd: result.costUsd,
+            }),
+          );
+        } else if (result.answer.brief) {
+          // Nothing to accept: the decision is the result of this message.
+          newBrief = { ...brief, ...result.answer.brief };
+          songs.update(db, song.id, { brief: newBrief });
+        }
+        const message = agentChat.add(db, {
+          songId: song.id,
+          userId: user.id,
+          role: 'assistant',
+          content: result.answer.reply ?? result.answer.summary,
+          proposalId: proposal?.id ?? null,
+        });
+        send({ type: 'done', message, proposal, brief: newBrief });
+      }),
+    );
+  });
+
+  /** Writes a new song from a description and/or a Music Brief. The song exists only if this succeeds. */
+  app.post('/api/agent/compose', { config: agentRateLimit }, async (request, reply) => {
+    const user = currentUser(request);
+    const body = parse(composeRequestSchema, request.body);
+    return streamEvents(request, reply, (send, signal) =>
+      oneAtATime(user.id, async () => {
+        send({ type: 'status', text: 'The agent is composing…' });
+        const result = await runAgent(
+          { app, userId: user.id, songId: null, purpose: 'compose' },
+          {
+            baseCode: COMPOSE_BASE_CODE,
+            tier: body.tier,
+            messages: composeMessages({ description: body.description, brief: body.brief }),
+            signal,
+          },
+        );
+        if (result.code === COMPOSE_BASE_CODE) throw new HttpError(422, result.answer.summary);
+        const created = songs.create(db, {
+          ownerId: user.id,
+          title: body.title || result.answer.title || 'New song',
+          visibility: 'private',
+          code: COMPOSE_BASE_CODE,
+          brief: { ...body.brief, ...result.answer.brief },
+        });
+        const dto = songs.dto(db, created, user);
+        const proposal = proposals.create(db, {
+          songId: created.id,
+          userId: user.id,
+          baseVersionId: dto.currentVersion.id,
+          instruction: body.description || 'Compose a song from the brief',
+          track: null,
+          tier: body.tier,
+          summary: result.answer.summary,
+          baseCode: COMPOSE_BASE_CODE,
+          code: result.code,
+          brief: null,
+          model: result.model,
+          costUsd: result.costUsd,
+        });
+        if (body.description)
+          agentChat.add(db, {
+            songId: created.id,
+            userId: user.id,
+            role: 'user',
+            content: body.description,
+          });
+        agentChat.add(db, {
+          songId: created.id,
+          userId: user.id,
+          role: 'assistant',
+          content: result.answer.summary,
+          proposalId: proposal.id,
+        });
+        audit.log(db, 'agent.composed', {
+          userId: user.id,
+          ip: request.ip,
+          details: { songId: created.id, proposalId: proposal.id },
+        });
+        send({ type: 'done', songId: created.id });
+      }),
+    );
+  });
 
   /** The proposal failed when tried in the player: give the model the error. */
   app.post(

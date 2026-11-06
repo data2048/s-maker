@@ -47,7 +47,13 @@ export async function callModel(
   ctx: AgentContext,
   model: string,
   messages: ChatMessage[],
-  opts: { maxTokens: number; json?: boolean; temperature?: number },
+  opts: {
+    maxTokens: number;
+    json?: boolean;
+    temperature?: number;
+    onText?(textSoFar: string): void;
+    signal?: AbortSignal;
+  },
 ) {
   const { app, userId, songId, purpose } = ctx;
   try {
@@ -91,6 +97,8 @@ export function checkAnswer(raw: string, baseCode: string): { answer: AgentAnswe
     throw new Error(`Wrong answer format at ${issue?.path.join('.') ?? '?'}: ${issue?.message ?? ''}`);
   }
   const answer = parsed.data;
+  // A chat reply changes nothing, so there is nothing to check.
+  if (!answer.changes.length) return { answer, code: baseCode };
   const code = applyAgentChanges(baseCode, answer.changes);
   const tracks = parseTracks(code);
   if (!tracks.ok) throw new Error(`The new code has a syntax error: ${tracks.error}`);
@@ -112,7 +120,13 @@ export function checkAnswer(raw: string, baseCode: string): { answer: AgentAnswe
  */
 export async function runAgent(
   ctx: AgentContext,
-  input: { messages: ChatMessage[]; baseCode: string; tier: ModelTier },
+  input: {
+    messages: ChatMessage[];
+    baseCode: string;
+    tier: ModelTier;
+    onText?(textSoFar: string): void;
+    signal?: AbortSignal;
+  },
 ): Promise<CheckedAnswer> {
   const settings = agentSettings.get(ctx.app.db, ctx.app.config);
   assertWithinLimits(ctx.app, ctx.userId, settings);
@@ -126,7 +140,12 @@ export async function runAgent(
       let content: string;
       let usedModel: string;
       try {
-        const r = await callModel(ctx, model, messages, { maxTokens: MAX_TOKENS[input.tier], json: true });
+        const r = await callModel(ctx, model, messages, {
+          maxTokens: MAX_TOKENS[input.tier],
+          json: true,
+          ...(input.onText ? { onText: input.onText } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
         costUsd += r.costUsd;
         content = r.content;
         usedModel = r.model;

@@ -6,12 +6,36 @@ export const FAKE_LLM_PORT = 44578;
 interface Body {
   messages: { role: string; content: string }[];
   model: string;
+  stream?: boolean;
 }
 
 function answerFor(body: Body): object {
   const all = body.messages.map((m) => m.content).join('\n');
-  const request = body.messages.find((m) => m.role === 'user')?.content ?? '';
-  if (request.includes('USE A BAD SOUND')) {
+  const request = body.messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+  if (request.includes('# COMPOSE')) {
+    return {
+      title: 'Fake Song',
+      summary: 'Composed a short piece',
+      changes: [
+        { type: 'header', code: 'setcpm(90/4)\nconst verse_bass = note("c2 g1").s("gm_acoustic_bass")' },
+        { type: 'add', name: 'drums', code: 's("bd sd").bank("RolandTR909")' },
+        { type: 'add', name: 'bass', code: 'arrange([4, verse_bass])' },
+      ],
+      brief: { tempo: '90 BPM', key: 'C minor' },
+    };
+  }
+  if (request.includes('# CHAT')) {
+    const asked = request.slice(request.indexOf('# REQUEST'));
+    if (asked.includes('What key')) return { reply: 'It is in C major, and the "bass" follows the chords.' };
+    if (asked.includes('slow'))
+      return { reply: 'I noted a slow tempo.', brief: { tempo: 'slow, about 70 BPM' } };
+    return {
+      reply: 'Changed the bass to a synth.',
+      summary: 'Bass to synth',
+      changes: [{ type: 'track', name: 'bass', code: 'note("c2 g1").s("gm_synth_bass_2")' }],
+    };
+  }
+  if (all.includes('USE A BAD SOUND')) {
     return all.includes('it failed with')
       ? {
           summary: 'Fixed the sound',
@@ -39,6 +63,21 @@ export function startFakeLlm(): Server {
         return;
       }
       const body = JSON.parse(raw) as Body;
+      if (body.stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        const content = JSON.stringify(answerFor(body));
+        const chunks = content.match(/[\s\S]{1,12}/g) ?? [];
+        res.write(': OPENROUTER PROCESSING\n\n');
+        for (const c of chunks)
+          res.write(
+            `data: ${JSON.stringify({ model: body.model, choices: [{ delta: { content: c } }] })}\n\n`,
+          );
+        res.write(
+          `data: ${JSON.stringify({ model: body.model, choices: [], usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.01 } })}\n\n`,
+        );
+        res.end('data: [DONE]\n\n');
+        return;
+      }
       res.end(
         JSON.stringify({
           model: body.model,

@@ -1,6 +1,7 @@
 // Agent data: call log with costs, settings and proposals.
 import type {
   AgentCallDto,
+  AgentChatMessageDto,
   AgentProposalDto,
   AgentSettings,
   AgentUsageDto,
@@ -209,6 +210,23 @@ export const proposals = {
       .get(id, songId, userId) as ProposalRow | undefined;
   },
 
+  /** The latest change waiting for an answer. */
+  pending(db: Db, songId: number, userId: number): ProposalRow | undefined {
+    return db
+      .prepare(
+        `SELECT * FROM agent_proposals WHERE song_id = ? AND user_id = ? AND status = 'pending'
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(songId, userId) as ProposalRow | undefined;
+  },
+
+  /** A new proposal replaces older ones that nobody answered. */
+  closePending(db: Db, songId: number, userId: number): void {
+    db.prepare(
+      `UPDATE agent_proposals SET status = 'rejected' WHERE song_id = ? AND user_id = ? AND status = 'pending'`,
+    ).run(songId, userId);
+  },
+
   setStatus(db: Db, id: number, status: 'accepted' | 'rejected'): void {
     db.prepare('UPDATE agent_proposals SET status = ? WHERE id = ?').run(status, id);
   },
@@ -222,5 +240,57 @@ export const proposals = {
       `UPDATE agent_proposals SET code = ?, summary = ?, brief = ?, model = ?,
          cost_usd = cost_usd + ?, repairs = repairs + 1 WHERE id = ?`,
     ).run(p.code, p.summary, p.brief ? JSON.stringify(p.brief) : null, p.model, p.addCost, id);
+  },
+};
+
+interface ChatRow {
+  id: number;
+  role: AgentChatMessageDto['role'];
+  content: string;
+  proposal_id: number | null;
+  proposal_status: AgentProposalDto['status'] | null;
+  created_at: number;
+}
+
+const CHAT_SELECT = `SELECT m.id, m.role, m.content, m.proposal_id, m.created_at, p.status AS proposal_status
+  FROM agent_chat_messages m LEFT JOIN agent_proposals p ON p.id = m.proposal_id`;
+
+const chatDto = (r: ChatRow): AgentChatMessageDto => ({
+  id: r.id,
+  role: r.role,
+  content: r.content,
+  at: new Date(r.created_at).toISOString(),
+  proposalId: r.proposal_id,
+  proposalStatus: r.proposal_status,
+});
+
+export const agentChat = {
+  add(
+    db: Db,
+    m: {
+      songId: number;
+      userId: number;
+      role: AgentChatMessageDto['role'];
+      content: string;
+      proposalId?: number | null;
+    },
+  ): AgentChatMessageDto {
+    const r = db
+      .prepare(
+        `INSERT INTO agent_chat_messages (song_id, user_id, role, content, proposal_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(m.songId, m.userId, m.role, m.content, m.proposalId ?? null, Date.now());
+    return chatDto(
+      db.prepare(`${CHAT_SELECT} WHERE m.id = ?`).get(Number(r.lastInsertRowid)) as unknown as ChatRow,
+    );
+  },
+
+  /** Each person has their own conversation with the agent about a song. */
+  list(db: Db, songId: number, userId: number, limit = 200): AgentChatMessageDto[] {
+    const rows = db
+      .prepare(`${CHAT_SELECT} WHERE m.song_id = ? AND m.user_id = ? ORDER BY m.id DESC LIMIT ?`)
+      .all(songId, userId, limit) as unknown as ChatRow[];
+    return rows.reverse().map(chatDto);
   },
 };

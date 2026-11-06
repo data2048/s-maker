@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { ComposePage } from './pages/ComposePage';
 import { AuthProvider, RequireAuth } from './auth';
 import { Layout } from './components/Layout';
 import { AdminPage } from './pages/AdminPage';
@@ -27,6 +28,7 @@ export function App() {
             <Route index element={<HomePage />} />
             <Route path="songs/:id" element={<SongPage />} />
             <Route path="import" element={<ImportPage />} />
+            <Route path="compose" element={<ComposePage />} />
             <Route path="playground" element={<PlaygroundPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route

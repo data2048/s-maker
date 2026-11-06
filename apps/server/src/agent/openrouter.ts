@@ -12,6 +12,8 @@ export interface ChatRequest {
   /** Ask for a JSON object as the answer. */
   json?: boolean;
   signal?: AbortSignal;
+  /** Stream the answer: called with all the text so far, each time more arrives. */
+  onText?(textSoFar: string): void;
 }
 
 export interface ChatResult {
@@ -39,6 +41,53 @@ export class LlmError extends Error {
   ) {
     super(message);
   }
+}
+
+interface ChatResponse {
+  error?: { message?: string; code?: number };
+  model?: string;
+  choices?: { message?: { content?: string | null } }[];
+  usage?: Usage;
+}
+
+/** Reads a server-sent stream into the same shape as a plain response. */
+async function readStream(
+  body: ReadableStream<Uint8Array>,
+  onText: (text: string) => void,
+): Promise<ChatResponse> {
+  const out: ChatResponse = {};
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  const handle = (line: string) => {
+    // Other lines are comments that keep the connection open.
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (payload === '[DONE]') return;
+    let chunk: ChatResponse & { choices?: { delta?: { content?: string | null } }[] };
+    try {
+      chunk = JSON.parse(payload) as typeof chunk;
+    } catch {
+      return;
+    }
+    if (chunk.error) out.error = chunk.error;
+    if (chunk.model) out.model = chunk.model;
+    if (chunk.usage) out.usage = chunk.usage;
+    const delta = chunk.choices?.[0]?.delta?.content;
+    if (delta) {
+      content += delta;
+      onText(content);
+    }
+  };
+  for await (const bytes of body as unknown as AsyncIterable<Uint8Array>) {
+    buffer += decoder.decode(bytes, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(handle);
+  }
+  handle(buffer);
+  out.choices = [{ message: { content } }];
+  return out;
 }
 
 const TIMEOUT_MS = 150_000;
@@ -97,6 +146,7 @@ export function createOpenRouterClient(opts: {
               // Models may think before answering; we only need the answer.
               reasoning: { exclude: true },
               ...(req.json ? { response_format: { type: 'json_object' } } : {}),
+              ...(req.onText ? { stream: true } : {}),
             }),
           });
         } catch (e) {
@@ -119,12 +169,11 @@ export function createOpenRouterClient(opts: {
         if (res.status === 402) throw new LlmError('The OpenRouter key is out of credit', false, spent);
         if (!res.ok) throw new LlmError(`The model request failed (${res.status})`, true, spent);
 
-        const data = (await res.json().catch(() => null)) as {
-          error?: { message?: string; code?: number };
-          model?: string;
-          choices?: { message?: { content?: string | null } }[];
-          usage?: Usage;
-        } | null;
+        const data: ChatResponse | null =
+          req.onText && res.body
+            ? await readStream(res.body, req.onText).catch(() => null)
+            : await (res.json() as Promise<ChatResponse>).catch(() => null);
+        if (req.signal?.aborted) throw new LlmError('Cancelled', false, spent);
         // Paid for even when the answer turns out to be unusable.
         spent += costOf(data?.usage);
         // OpenRouter also reports provider errors with status 200.
