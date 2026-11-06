@@ -1,4 +1,5 @@
 import {
+  AGENT_PRIVACY_NOTE,
   EXPLANATION_LEVELS,
   MAX_EXPLANATION_NOTE_LENGTH,
   type ExplanationLevel,
@@ -156,6 +157,7 @@ export function ExplainPanel({ songId, versionId, versionNumber, dirty, onSpent,
         {dirty && (
           <p className="muted small">Unsaved edits are not explained, only the saved v{versionNumber}.</p>
         )}
+        <p className="muted small agent-privacy">{AGENT_PRIVACY_NOTE}</p>
       </form>
       {error && <p className="alert error small">{error}</p>}
       {partial && <div className="chat-msg assistant">{partial}</div>}

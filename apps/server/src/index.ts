@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path';
+import { agentRuns } from './agent/runs';
 import { buildApp } from './app';
 import { bootstrapAdmin } from './auth/bootstrap';
 import { loginFailures, sessions } from './auth/store';
@@ -15,10 +16,11 @@ async function main(): Promise<void> {
   const app = await buildApp({ config, db });
   bootstrapAdmin(db, config, app.log);
 
-  // Housekeeping: drop expired sessions and old login failures every hour.
+  // Housekeeping every hour: drop expired sessions, old login failures and old agent runs nobody marked.
   const cleanup = () => {
     sessions.deleteExpired(db);
     loginFailures.deleteOld(db);
+    agentRuns.deleteOld(db);
   };
   cleanup();
   setInterval(cleanup, 3600 * 1000).unref();

@@ -167,6 +167,8 @@ export async function explainRoutes(app: FastifyInstance): Promise<void> {
           const result = await runText(
             { app, userId: user.id, songId: song.id, purpose: 'explain' },
             {
+              request: `Explain, level ${body.level}${body.note ? `: ${body.note}` : ''}`,
+              inputCode: version.code,
               tier: body.tier,
               messages: explainMessages({
                 code: version.code,

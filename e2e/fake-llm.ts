@@ -3,6 +3,14 @@ import { createServer, type Server } from 'node:http';
 
 export const FAKE_LLM_PORT = 44578;
 
+const USAGE = {
+  prompt_tokens: 1000,
+  completion_tokens: 100,
+  cost: 0.01,
+  prompt_tokens_details: { cached_tokens: 800 },
+  completion_tokens_details: { reasoning_tokens: 40 },
+};
+
 interface Body {
   messages: { role: string; content: string }[];
   model: string;
@@ -90,19 +98,17 @@ export function startFakeLlm(): Server {
         res.write(': OPENROUTER PROCESSING\n\n');
         for (const c of chunks)
           res.write(
-            `data: ${JSON.stringify({ model: body.model, choices: [{ delta: { content: c } }] })}\n\n`,
+            `data: ${JSON.stringify({ model: body.model, choices: [{ delta: { content: c }, finish_reason: c === chunks.at(-1) ? 'stop' : null }] })}\n\n`,
           );
-        res.write(
-          `data: ${JSON.stringify({ model: body.model, choices: [], usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.01 } })}\n\n`,
-        );
+        res.write(`data: ${JSON.stringify({ model: body.model, choices: [], usage: USAGE })}\n\n`);
         res.end('data: [DONE]\n\n');
         return;
       }
       res.end(
         JSON.stringify({
           model: body.model,
-          choices: [{ message: { content: contentFor(body) } }],
-          usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.01 },
+          choices: [{ message: { content: contentFor(body) }, finish_reason: 'stop' }],
+          usage: USAGE,
         }),
       );
     });

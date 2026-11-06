@@ -1,4 +1,10 @@
-import { diffLines, type AgentProposalDto, type AgentUsageDto, type ModelTier } from '@s-maker/shared';
+import {
+  AGENT_PRIVACY_NOTE,
+  diffLines,
+  type AgentProposalDto,
+  type AgentUsageDto,
+  type ModelTier,
+} from '@s-maker/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
 import type { AgentProposalState } from './useAgentProposal';
@@ -126,6 +132,7 @@ export function AgentPanel(props: Props) {
           </span>
         )}
       </form>
+      <p className="muted small agent-privacy">{AGENT_PRIVACY_NOTE}</p>
       {overLimit && <p className="alert warn small">The weekly agent limit is used up.</p>}
       {error && <p className="alert error small">{error}</p>}
       {proposal && (

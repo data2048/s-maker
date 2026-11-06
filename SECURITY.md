@@ -20,6 +20,14 @@ s-maker is built against the OWASP Top 10. The main rules:
   right file signature and size, notes are validated and the app writes the MIDI file itself. Nothing goes to
   the server.
 - **Access control is enforced on the server** for every resource (owner, visibility, role); deny by default.
+- **The admin can read what is sent to the agent.** To find out why results were poor, the app logs each agent
+  run: the request, the code sent, every message to the model and its visible answer, including those from
+  private songs. Only the admin can read them, the app says so wherever people use the agent, and each read or
+  download goes to the audit log. For a song the agent worked on, the admin can also read its saved versions; other
+  private songs stay closed. Runs nobody marked are deleted after 90 days; deleting a song deletes its runs, marked
+  ones too. Downloaded files have no user names, but they do hold what people wrote and their song titles, so they
+  belong in `kb/raw/`, which is not committed. The text of a model's thinking is neither requested nor stored,
+  only its token count. Logged text is shown only as text.
 - **Authentication:** invite-only accounts, argon2id password hashes, random session ids stored as hashes,
   `HttpOnly` + `Secure` + `SameSite` cookies, CSRF protection, rate limiting on login.
 - **Input:** every request body is validated with zod; SQL uses parameterized statements only;

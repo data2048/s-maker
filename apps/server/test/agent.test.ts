@@ -40,6 +40,9 @@ function fakeLlm(enabled = true) {
         promptTokens: 100,
         completionTokens: 50,
         costUsd: 0.01,
+        reasoningTokens: null,
+        cachedTokens: null,
+        finishReason: 'stop',
         ...r,
       };
     },
@@ -694,7 +697,16 @@ describe('OpenRouter client', () => {
       seen = { url, init };
       return ok(good);
     }) as typeof fetch).chat({ ...req, json: true });
-    expect(r).toEqual({ content: 'hi', model: 'm/x', promptTokens: 10, completionTokens: 5, costUsd: 0.001 });
+    expect(r).toEqual({
+      content: 'hi',
+      model: 'm/x',
+      promptTokens: 10,
+      completionTokens: 5,
+      reasoningTokens: null,
+      cachedTokens: null,
+      finishReason: null,
+      costUsd: 0.001,
+    });
     const { url, init } = seen!;
     expect(url).toBe('https://llm.test/v1/chat/completions');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-key');
@@ -771,7 +783,7 @@ describe('OpenRouter client', () => {
     }) as typeof fetch).chat({ ...req, onText: (t) => seen.push(t) });
     expect(sent.stream).toBe(true);
     expect(seen).toEqual(['he', 'hello']);
-    expect(r).toEqual({
+    expect(r).toMatchObject({
       content: 'hello',
       model: 'm/x',
       promptTokens: 3,

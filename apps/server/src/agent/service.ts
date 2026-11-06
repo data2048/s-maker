@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { HttpError } from '../http-error';
 import { LlmError, type ChatMessage } from './openrouter';
 import { repairMessage } from './prompt';
+import { agentRuns, quietly, type AttemptLog } from './runs';
 import { agentCalls, agentSettings } from './store';
 
 /** Attempts for one request when an answer does not pass the checks. */
@@ -26,6 +27,68 @@ export interface AgentContext {
   userId: number;
   songId: number | null;
   purpose: string;
+  /** The log entry this call belongs to. Null if it could not be started. */
+  runId?: number | null;
+}
+
+/** What goes into the log besides the model calls. */
+export interface RunInfo {
+  /** What the person asked for, in their own words. */
+  request: string;
+  /** Set when this run works on a proposal that already exists. */
+  proposalId?: number;
+}
+
+function startRun(
+  ctx: AgentContext,
+  input: RunInfo & { tier: ModelTier; inputCode: string | null },
+): number | null {
+  return quietly(ctx.app, () =>
+    agentRuns.start(ctx.app.db, {
+      userId: ctx.userId,
+      songId: ctx.songId,
+      proposalId: input.proposalId ?? null,
+      purpose: ctx.purpose,
+      tier: input.tier,
+      request: input.request,
+      inputCode: input.inputCode,
+    }),
+  );
+}
+
+function finishRun(
+  ctx: AgentContext,
+  runId: number | null,
+  outcome: { outputCode?: string } | { failure: unknown; signal?: AbortSignal | undefined },
+): void {
+  if (runId === null) return;
+  quietly(ctx.app, () =>
+    agentRuns.finish(
+      ctx.app.db,
+      runId,
+      'failure' in outcome
+        ? {
+            status: outcome.signal?.aborted ? 'cancelled' : 'failed',
+            error: outcome.failure instanceof Error ? outcome.failure.message : String(outcome.failure),
+          }
+        : { status: 'ok', outputCode: outcome.outputCode ?? null },
+    ),
+  );
+}
+
+/** Ties a finished run to the song or proposal that came out of it. */
+export function linkRun(
+  app: FastifyInstance,
+  runId: number | null,
+  link: { songId?: number; proposalId?: number },
+): void {
+  if (runId !== null) quietly(app, () => agentRuns.link(app.db, runId, link));
+}
+
+function logAttempt(ctx: AgentContext, attempt: AttemptLog): number | null {
+  const { runId } = ctx;
+  if (runId === undefined || runId === null) return null;
+  return quietly(ctx.app, () => agentRuns.addAttempt(ctx.app.db, runId, attempt));
 }
 
 export function assertWithinLimits(app: FastifyInstance, userId: number, settings: AgentSettings): void {
@@ -56,6 +119,7 @@ export async function callModel(
   },
 ) {
   const { app, userId, songId, purpose } = ctx;
+  const started = Date.now();
   try {
     const result = await app.llm.chat({ model, messages, ...opts });
     agentCalls.log(app.db, {
@@ -68,10 +132,33 @@ export async function callModel(
       costUsd: result.costUsd,
       status: 'ok',
     });
-    return result;
+    const attemptId = logAttempt(ctx, {
+      model: result.model,
+      messages,
+      answer: result.content,
+      finishReason: result.finishReason,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      reasoningTokens: result.reasoningTokens,
+      cachedTokens: result.cachedTokens,
+      costUsd: result.costUsd,
+      durationMs: Date.now() - started,
+    });
+    return { ...result, attemptId };
   } catch (e) {
     const costUsd = e instanceof LlmError ? e.costUsd : 0;
     agentCalls.log(app.db, { userId, songId, purpose, model, costUsd, status: 'error' });
+    const message = e instanceof Error ? e.message : String(e);
+    const info = e instanceof LlmError ? e.info : null;
+    const providerMessage = e instanceof LlmError ? e.providerMessage : null;
+    logAttempt(ctx, {
+      model,
+      messages,
+      error: providerMessage ? `${message}: ${providerMessage}` : message,
+      ...(info ?? {}),
+      costUsd,
+      durationMs: Date.now() - started,
+    });
     throw e;
   }
 }
@@ -81,6 +168,8 @@ export interface CheckedAnswer {
   code: string;
   model: string;
   costUsd: number;
+  /** The log entry of this run. Null if the log could not be written. */
+  runId: number | null;
 }
 
 /** Everything an answer must pass before the user sees it. Returns the new code or throws with the reason. */
@@ -117,6 +206,28 @@ export function checkAnswer(raw: string, baseCode: string): { answer: AgentAnswe
 /** For an answer that is plain text: the first model that gives one, with the next as a fallback. */
 export async function runText(
   ctx: AgentContext,
+  input: RunInfo & {
+    messages: ChatMessage[];
+    tier: ModelTier;
+    /** The code being talked about. */
+    inputCode: string;
+    onText?(textSoFar: string): void;
+    signal?: AbortSignal;
+  },
+): Promise<{ content: string; model: string; costUsd: number }> {
+  const runId = startRun(ctx, input);
+  try {
+    const result = await textLoop({ ...ctx, runId }, input);
+    finishRun(ctx, runId, {});
+    return result;
+  } catch (e) {
+    finishRun(ctx, runId, { failure: e, signal: input.signal });
+    throw e;
+  }
+}
+
+async function textLoop(
+  ctx: AgentContext,
   input: {
     messages: ChatMessage[];
     tier: ModelTier;
@@ -151,7 +262,7 @@ export async function runText(
  */
 export async function runAgent(
   ctx: AgentContext,
-  input: {
+  input: RunInfo & {
     messages: ChatMessage[];
     baseCode: string;
     tier: ModelTier;
@@ -159,6 +270,27 @@ export async function runAgent(
     signal?: AbortSignal;
   },
 ): Promise<CheckedAnswer> {
+  const runId = startRun(ctx, { ...input, inputCode: input.baseCode });
+  try {
+    const result = await agentLoop({ ...ctx, runId }, input);
+    finishRun(ctx, runId, { outputCode: result.code });
+    return { ...result, runId };
+  } catch (e) {
+    finishRun(ctx, runId, { failure: e, signal: input.signal });
+    throw e;
+  }
+}
+
+async function agentLoop(
+  ctx: AgentContext,
+  input: {
+    messages: ChatMessage[];
+    baseCode: string;
+    tier: ModelTier;
+    onText?(textSoFar: string): void;
+    signal?: AbortSignal;
+  },
+): Promise<Omit<CheckedAnswer, 'runId'>> {
   const settings = agentSettings.get(ctx.app.db, ctx.app.config);
   assertWithinLimits(ctx.app, ctx.userId, settings);
   let costUsd = 0;
@@ -170,6 +302,7 @@ export async function runAgent(
       assertWithinLimits(ctx.app, ctx.userId, settings);
       let content: string;
       let usedModel: string;
+      let attemptId: number | null;
       try {
         const r = await callModel(ctx, model, messages, {
           maxTokens: MAX_TOKENS[input.tier],
@@ -180,6 +313,7 @@ export async function runAgent(
         costUsd += r.costUsd;
         content = r.content;
         usedModel = r.model;
+        attemptId = r.attemptId;
       } catch (e) {
         if (e instanceof LlmError) costUsd += e.costUsd;
         if (e instanceof LlmError && !e.retryable) throw new HttpError(502, e.message);
@@ -191,6 +325,11 @@ export async function runAgent(
         return { answer, code, model: usedModel, costUsd };
       } catch (e) {
         lastProblem = e instanceof Error ? e.message : lastProblem;
+        if (attemptId !== null) {
+          const id = attemptId;
+          const reason = lastProblem;
+          quietly(ctx.app, () => agentRuns.rejectAttempt(ctx.app.db, id, reason));
+        }
         messages.push({ role: 'assistant', content: content.slice(0, 20_000) }, repairMessage(lastProblem));
       }
     }

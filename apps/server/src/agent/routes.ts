@@ -23,7 +23,7 @@ import { audit } from '../auth/store';
 import { badRequest, conflict, forbidden, HttpError, notFound, parse } from '../http-error';
 import { canEdit, canView, songs, versions } from '../songs/store';
 import { chatMessages, composeMessages, proposeMessages, repairMessage } from './prompt';
-import { runAgent } from './service';
+import { linkRun, runAgent } from './service';
 import { agentCalls, agentChat, agentSettings, proposalDto, proposals } from './store';
 
 const songParams = z.object({ id: z.coerce.number().int().positive() });
@@ -132,6 +132,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         runAgent(
           { app, userId: user.id, songId: song.id, purpose: body.track ? 'track' : 'song' },
           {
+            request: body.instruction,
             baseCode: body.code,
             tier: body.tier,
             messages: proposeMessages({
@@ -159,6 +160,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         model: result.model,
         costUsd: result.costUsd,
       });
+      linkRun(app, result.runId, { proposalId: row.id });
       reply.status(201);
       return proposalDto(row);
     },
@@ -190,6 +192,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         const result = await runAgent(
           { app, userId: user.id, songId: song.id, purpose: 'chat' },
           {
+            request: body.message,
             baseCode: body.code,
             tier: body.tier,
             messages: chatMessages({ code: body.code, brief, message: body.message, history }),
@@ -217,6 +220,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
               costUsd: result.costUsd,
             }),
           );
+          linkRun(app, result.runId, { proposalId: proposal.id });
         } else if (result.answer.brief) {
           // Nothing to accept: the decision is the result of this message.
           newBrief = { ...brief, ...result.answer.brief };
@@ -244,6 +248,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         const result = await runAgent(
           { app, userId: user.id, songId: null, purpose: 'compose' },
           {
+            request: body.description || 'Compose a song from the brief',
             baseCode: COMPOSE_BASE_CODE,
             tier: body.tier,
             messages: composeMessages({ description: body.description, brief: body.brief }),
@@ -273,6 +278,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
           model: result.model,
           costUsd: result.costUsd,
         });
+        linkRun(app, result.runId, { songId: created.id, proposalId: proposal.id });
         if (body.description)
           agentChat.add(db, {
             songId: created.id,
@@ -329,7 +335,13 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       const result = await oneAtATime(user.id, () =>
         runAgent(
           { app, userId: user.id, songId: song.id, purpose: 'repair' },
-          { baseCode: row.base_code, tier: row.tier as ModelTier, messages },
+          {
+            request: `Failed in the player: ${error}`,
+            proposalId: row.id,
+            baseCode: row.base_code,
+            tier: row.tier as ModelTier,
+            messages,
+          },
         ),
       );
       proposals.updateAfterRepair(db, row.id, {
