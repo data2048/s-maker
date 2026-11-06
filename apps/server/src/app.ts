@@ -8,6 +8,7 @@ import type { Config } from './config';
 import type { Db } from './db';
 import authPlugin from './auth/plugin';
 import { authRoutes } from './auth/routes';
+import { explainRoutes } from './agent/explain';
 import { agentRoutes } from './agent/routes';
 import { createOpenRouterClient, type LlmClient } from './agent/openrouter';
 import { HttpError } from './http-error';
@@ -107,6 +108,7 @@ export async function buildApp({ config, db, llm }: AppDeps): Promise<FastifyIns
   await app.register(songRoutes);
   await app.register(midiRoutes);
   await app.register(agentRoutes);
+  await app.register(explainRoutes);
 
   const webDist = config.webDist;
   if (webDist && existsSync(join(webDist, 'index.html'))) {

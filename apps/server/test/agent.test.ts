@@ -5,6 +5,7 @@ import type {
   AgentStreamEvent,
   AgentUsageDto,
   SongDto,
+  SongExplanationDto,
   VersionDto,
 } from '@s-maker/shared';
 import type { FastifyInstance } from 'fastify';
@@ -16,6 +17,7 @@ import {
   type ChatResult,
   type LlmClient,
 } from '../src/agent/openrouter';
+import { cleanExplanation, explanationMarkdown, fileNameFor } from '../src/agent/explain';
 import { systemPrompt } from '../src/agent/prompt';
 import { call, createTestApp, createUser, setupAdmin, type Client } from './helpers';
 
@@ -525,6 +527,121 @@ describe('compose', () => {
     expect(last((await compose({ description: 'Calm' })).body).type).toBe('error');
     const after = ((await call(app, alice, 'GET', '/api/songs')).json() as { songs: unknown[] }).songs.length;
     expect(after).toBe(before);
+  });
+});
+
+describe('explanations', () => {
+  const explain = (client: Client, body: object = {}) =>
+    call(app, client, 'POST', `/api/songs/${song.id}/explanations`, body);
+  const made = (body: string) =>
+    (JSON.parse(body.trim().split('\n').at(-1)!) as Extract<AgentStreamEvent, { type: 'done' }>).explanation!;
+  const list = async (client: Client) =>
+    (
+      (await call(app, client, 'GET', `/api/songs/${song.id}/explanations`)).json() as {
+        explanations: SongExplanationDto[];
+      }
+    ).explanations;
+
+  it('keeps the explanation and the code with the version, and logs the cost', async () => {
+    llm.queue.push({ content: 'Drums and bass.', costUsd: 0.02 });
+    const e = made((await explain(alice, { level: 'short' })).body);
+    expect(e).toMatchObject({ level: 'short', versionNumber: 1, canDelete: true });
+    expect(e.content).toContain('# S (v1)');
+    expect(e.content).toContain('Drums and bass.');
+    expect(e.content).toContain('```strudel');
+    expect(e.content).toContain('gm_electric_bass_finger');
+    expect(llm.requests[0]!.json).toBeUndefined();
+    expect(llm.requests[0]!.messages[1]!.content).toContain('Level: short');
+    const admin = (await call(app, alice, 'GET', '/api/admin/agent')).json() as AgentAdminDto;
+    expect(admin.recent[0]).toMatchObject({ purpose: 'explain', costUsd: 0.02, status: 'ok' });
+  });
+
+  it('keeps several, for any version', async () => {
+    llm.queue.push('One.', 'Two.');
+    await explain(alice, { level: 'short' });
+    const old = song.currentVersion;
+    const v2 = (
+      await call(app, alice, 'POST', `/api/songs/${song.id}/versions`, {
+        code: 'lead: note("c3").s("gm_flute")\n',
+        baseVersionId: old.id,
+      })
+    ).json() as VersionDto;
+    expect(v2.number).toBe(2);
+    expect(made((await explain(alice, { level: 'detailed' })).body).versionNumber).toBe(2);
+    expect((await list(alice)).map((e) => [e.level, e.versionNumber])).toEqual([
+      ['detailed', 2],
+      ['short', 1],
+    ]);
+  });
+
+  it('is visible to the group, who can ask too and pay from their own limit', async () => {
+    llm.queue.push('By Alice.', { content: 'By Bob.', costUsd: 0.5 });
+    await explain(alice);
+    const seen = await list(bob);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.canDelete).toBe(false);
+    expect((await explain(bob)).statusCode).toBe(200);
+    const usage = (await call(app, bob, 'GET', '/api/agent/usage')).json() as AgentUsageDto;
+    expect(usage.spentUsd).toBeCloseTo(0.5);
+    expect((await list(bob))[0]!.canDelete).toBe(true);
+  });
+
+  it('follows the song when it is private', async () => {
+    llm.queue.push('Secret.');
+    const e = made((await explain(alice)).body);
+    await call(app, alice, 'PATCH', `/api/songs/${song.id}`, { visibility: 'private' });
+    const url = `/api/songs/${song.id}/explanations`;
+    expect((await call(app, bob, 'GET', url)).statusCode).toBe(404);
+    expect((await call(app, bob, 'GET', `${url}/${e.id}/download`)).statusCode).toBe(404);
+    expect((await explain(bob)).statusCode).toBe(404);
+    expect(llm.requests).toHaveLength(1);
+  });
+
+  it('downloads as a file with a safe name', async () => {
+    await call(app, alice, 'PATCH', `/api/songs/${song.id}`, { title: 'Zła "nazwa"\r\nX: y' });
+    llm.queue.push('Text.');
+    const e = made((await explain(alice, { level: 'short' })).body);
+    const res = await call(app, alice, 'GET', `/api/songs/${song.id}/explanations/${e.id}/download`);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/markdown');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-disposition']).toMatch(/^attachment; filename="[\w-]+-v1-short\.md"$/);
+    expect(res.body).toContain('Text.');
+  });
+
+  it('can be deleted by its author or the owner, not by others', async () => {
+    llm.queue.push('A.', 'B.');
+    const byAlice = made((await explain(alice)).body);
+    const byBob = made((await explain(bob)).body);
+    const url = `/api/songs/${song.id}/explanations`;
+    expect((await call(app, bob, 'DELETE', `${url}/${byAlice.id}`)).statusCode).toBe(403);
+    expect((await call(app, bob, 'DELETE', `${url}/${byBob.id}`)).statusCode).toBe(200);
+    expect((await call(app, alice, 'DELETE', `${url}/${byAlice.id}`)).statusCode).toBe(200);
+    expect(await list(alice)).toEqual([]);
+  });
+
+  it('moves on to the fallback model, and reports when all fail', async () => {
+    llm.queue.push(new LlmError('The model provider is busy (503)', true), 'Works.');
+    expect(made((await explain(alice)).body).model).toBe('z-ai/glm-5.3');
+    llm.queue.push(new LlmError('busy', true), new LlmError('busy', true));
+    const res = await explain(alice);
+    expect(JSON.parse(res.body.trim().split('\n').at(-1)!)).toMatchObject({ type: 'error' });
+    expect(await list(alice)).toHaveLength(1);
+  });
+
+  it('builds the file without letting the code or title break it', () => {
+    const md = explanationMarkdown({
+      title: '# Bad\ntitle',
+      versionNumber: 3,
+      text: ' Text ',
+      code: 'a ``` b',
+    });
+    expect(md.startsWith('# Bad title (v3)\n\nText\n')).toBe(true);
+    expect(md).toContain('````strudel\na ``` b\n````');
+    expect(cleanExplanation('```markdown\nHello\n```')).toBe('Hello');
+    expect(cleanExplanation('A `b` c')).toBe('A `b` c');
+    expect(fileNameFor('', 1, 'short')).toBe('song-v1-short.md');
+    expect(fileNameFor('../../etc/passwd', 1, 'short')).toMatch(/^[\w-]+-v1-short\.md$/);
   });
 });
 

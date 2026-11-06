@@ -184,4 +184,22 @@ export const migrations: Migration[] = [
       CREATE INDEX agent_chat_song ON agent_chat_messages(song_id, user_id, id);
     `,
   },
+  {
+    id: 7,
+    name: 'song explanations',
+    sql: `
+      CREATE TABLE song_explanations (
+        id INTEGER PRIMARY KEY,
+        song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        version_id INTEGER NOT NULL REFERENCES song_versions(id) ON DELETE CASCADE,
+        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        level TEXT NOT NULL,
+        note TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX song_explanations_song ON song_explanations(song_id, id);
+    `,
+  },
 ];
