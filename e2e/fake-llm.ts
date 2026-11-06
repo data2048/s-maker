@@ -52,6 +52,26 @@ function answerFor(body: Body): object {
   };
 }
 
+/** What a model might write after reading a hostile song. None of it may run. */
+function explanationFor(request: string): string {
+  const level = request.includes('Level: short') ? 'Short' : 'Detailed';
+  return `${level} explanation with **bold** text.
+
+<img src="https://evil.example/x.png" onerror="window.xss=true">
+<script>window.xss=true</script>
+<iframe src="https://evil.example"></iframe>
+<p onclick="window.xss=true" style="color:red">Click</p>
+
+![tracking](https://evil.example/pixel.png)
+
+[bad link](javascript:window.xss=true) and [Strudel docs](https://strudel.cc/)`;
+}
+
+function contentFor(body: Body): string {
+  const request = body.messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+  return request.includes('# EXPLAIN') ? explanationFor(request) : JSON.stringify(answerFor(body));
+}
+
 export function startFakeLlm(): Server {
   const server = createServer((req, res) => {
     let raw = '';
@@ -65,7 +85,7 @@ export function startFakeLlm(): Server {
       const body = JSON.parse(raw) as Body;
       if (body.stream) {
         res.setHeader('Content-Type', 'text/event-stream');
-        const content = JSON.stringify(answerFor(body));
+        const content = contentFor(body);
         const chunks = content.match(/[\s\S]{1,12}/g) ?? [];
         res.write(': OPENROUTER PROCESSING\n\n');
         for (const c of chunks)
@@ -81,7 +101,7 @@ export function startFakeLlm(): Server {
       res.end(
         JSON.stringify({
           model: body.model,
-          choices: [{ message: { content: JSON.stringify(answerFor(body)) } }],
+          choices: [{ message: { content: contentFor(body) } }],
           usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.01 },
         }),
       );

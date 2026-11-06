@@ -217,8 +217,39 @@ export type AgentStreamEvent =
       proposal?: AgentProposalDto | null;
       brief?: MusicBrief | null;
       songId?: number;
+      explanation?: SongExplanationDto;
     }
   | { type: 'error'; error: string };
+
+export const EXPLANATION_LEVELS = ['short', 'normal', 'detailed'] as const;
+export type ExplanationLevel = (typeof EXPLANATION_LEVELS)[number];
+export const MAX_EXPLANATION_LENGTH = 40_000;
+export const MAX_EXPLANATION_NOTE_LENGTH = 500;
+
+export const explainRequestSchema = z.object({
+  level: z.enum(EXPLANATION_LEVELS).default('normal'),
+  /** Free text for the model: a language, or what to focus on. */
+  note: z.string().trim().max(MAX_EXPLANATION_NOTE_LENGTH).default(''),
+  /** The song's current version if not given. */
+  versionId: z.number().int().positive().optional(),
+  tier: z.enum(MODEL_TIERS).default('fast'),
+});
+export type ExplainRequest = z.input<typeof explainRequestSchema>;
+
+export interface SongExplanationDto {
+  id: number;
+  songId: number;
+  versionId: number;
+  versionNumber: number;
+  level: ExplanationLevel;
+  note: string;
+  /** Markdown: not trusted, render it only after sanitizing. */
+  content: string;
+  author: { id: number; displayName: string } | null;
+  model: string;
+  at: string;
+  canDelete: boolean;
+}
 
 export interface AgentUsageDto {
   enabled: boolean;

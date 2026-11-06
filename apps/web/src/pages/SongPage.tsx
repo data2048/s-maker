@@ -14,6 +14,7 @@ import { api, ApiError, errorMessage } from '../api';
 import { AgentPanel } from '../components/AgentPanel';
 import { BriefPanel } from '../components/BriefPanel';
 import { ChatPanel } from '../components/ChatPanel';
+import { ExplainPanel } from '../components/ExplainPanel';
 import { ErrorBox } from '../components/Form';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { Mixer } from '../components/Mixer';
@@ -58,7 +59,7 @@ export function SongPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [panel, setPanel] = useState<'history' | 'brief' | 'chat' | null>(
+  const [panel, setPanel] = useState<'history' | 'brief' | 'chat' | 'explain' | null>(
     searchParams.get('chat') ? 'chat' : null,
   );
   const [agentTrack, setAgentTrack] = useState<string | null>(null);
@@ -322,6 +323,13 @@ export function SongPage() {
         )}
         <button
           className="btn"
+          onClick={() => setPanel((p) => (p === 'explain' ? null : 'explain'))}
+          aria-pressed={panel === 'explain'}
+        >
+          Explain
+        </button>
+        <button
+          className="btn"
           onClick={() => setPanel((p) => (p === 'brief' ? null : 'brief'))}
           aria-pressed={panel === 'brief'}
         >
@@ -403,6 +411,16 @@ export function SongPage() {
             baseVersionId={baseVersionId}
             agent={agent}
             onBriefChanged={(brief) => setSong({ ...song, brief })}
+            onClose={() => setPanel(null)}
+          />
+        )}
+        {panel === 'explain' && (
+          <ExplainPanel
+            songId={song.id}
+            versionId={song.currentVersion.id}
+            versionNumber={song.currentVersion.number}
+            dirty={dirty}
+            onSpent={() => agent.setSpent((n) => n + 1)}
             onClose={() => setPanel(null)}
           />
         )}

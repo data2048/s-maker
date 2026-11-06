@@ -64,7 +64,7 @@ const HEARTBEAT_MS = 10_000;
  * Answers with one JSON object per line while the work runs. Problems found before this point are ordinary
  * HTTP errors; later ones are 'error' events. Closing the connection cancels the model call.
  */
-function streamEvents(
+export function streamEvents(
   request: FastifyRequest,
   reply: FastifyReply,
   work: (send: (event: AgentStreamEvent) => void, signal: AbortSignal) => Promise<void>,
@@ -97,11 +97,11 @@ function streamEvents(
     .send(stream);
 }
 
-/** Sends the "reply" field of a JSON answer as it arrives. */
-function replyStreamer(send: (event: AgentStreamEvent) => void) {
+/** Sends text as it arrives, as the part that is new. */
+export function textStreamer(send: (event: AgentStreamEvent) => void, read = (raw: string) => raw) {
   let sent = '';
   return (textSoFar: string) => {
-    const text = partialJsonString(textSoFar, 'reply') ?? '';
+    const text = read(textSoFar);
     if (text.startsWith(sent)) {
       if (text.length > sent.length) send({ type: 'delta', text: text.slice(sent.length) });
     } else {
@@ -193,7 +193,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
             baseCode: body.code,
             tier: body.tier,
             messages: chatMessages({ code: body.code, brief, message: body.message, history }),
-            onText: replyStreamer(send),
+            onText: textStreamer(send, (raw) => partialJsonString(raw, 'reply') ?? ''),
             signal,
           },
         );

@@ -297,6 +297,7 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 
 - Polecenie „explain” z poziomem szczegółowości → plik `.md` z kodem i objaśnieniem.
 - Zapis przy wersji utworu, bezpieczny render, pobranie pliku, widoczne dla grupy (zgodnie z widocznością utworu).
+- Decyzje: objaśnienie może zamówić każdy, kto widzi utwór, i płaci z własnego limitu; usunąć je może autor albo właściciel utworu.
 - **Test:** prosisz o objaśnienie „krótko” i „szczegółowo”, oba widoczne przy utworze.
 
 ### Kamień milowy 4: społeczność

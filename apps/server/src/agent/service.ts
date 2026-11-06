@@ -114,6 +114,37 @@ export function checkAnswer(raw: string, baseCode: string): { answer: AgentAnswe
   return { answer, code };
 }
 
+/** For an answer that is plain text: the first model that gives one, with the next as a fallback. */
+export async function runText(
+  ctx: AgentContext,
+  input: {
+    messages: ChatMessage[];
+    tier: ModelTier;
+    onText?(textSoFar: string): void;
+    signal?: AbortSignal;
+  },
+): Promise<{ content: string; model: string; costUsd: number }> {
+  const settings = agentSettings.get(ctx.app.db, ctx.app.config);
+  let costUsd = 0;
+  let lastProblem = 'The model did not give a usable answer';
+  for (const model of modelOrder(settings, input.tier)) {
+    assertWithinLimits(ctx.app, ctx.userId, settings);
+    try {
+      const r = await callModel(ctx, model, input.messages, {
+        maxTokens: MAX_TOKENS[input.tier],
+        ...(input.onText ? { onText: input.onText } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      return { content: r.content, model: r.model, costUsd: costUsd + r.costUsd };
+    } catch (e) {
+      if (e instanceof LlmError) costUsd += e.costUsd;
+      if (e instanceof LlmError && !e.retryable) throw new HttpError(502, e.message);
+      lastProblem = e instanceof Error ? e.message : lastProblem;
+    }
+  }
+  throw new HttpError(502, `The agent could not finish: ${lastProblem.slice(0, 200)}`);
+}
+
 /**
  * Runs the model until an answer passes the checks. A failed answer goes back to the model with the reason.
  * If a model keeps failing or its provider is down, the next model in the order takes over.
