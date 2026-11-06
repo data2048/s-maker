@@ -1,10 +1,14 @@
 import {
   GRID_LABELS,
+  MIDI_TYPE_LABELS,
+  MIDI_TYPES,
   GRIDS,
   MAX_IMPORT_BARS,
   MAX_MIDI_BYTES,
   noteName,
   type GridSteps,
+  type ImportMode,
+  type MidiType,
   type MidiConvertResponse,
   type MidiImportResponse,
   type MidiUploadDto,
@@ -35,6 +39,8 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [parts, setParts] = useState<Set<number>>(new Set());
+  const [mode, setMode] = useState<ImportMode>('faithful');
+  const [midiType, setMidiType] = useState<MidiType>('other');
   const [grid, setGrid] = useState<GridSteps | 'auto'>('auto');
   const [fromBar, setFromBar] = useState(1);
   const [toBar, setToBar] = useState(1);
@@ -58,6 +64,7 @@ export function ImportPage() {
     setUpload(u);
     setParts(new Set(u.analysis.parts.map((p) => p.index)));
     setGrid('auto');
+    setMidiType(u.analysis.classification.type);
     setFromBar(1);
     setToBar(Math.min(u.analysis.bars, MAX_IMPORT_BARS));
     setTitle(titleFromFile(u.fileName));
@@ -90,6 +97,7 @@ export function ImportPage() {
   };
 
   const options = () => ({
+    mode,
     parts: [...parts].sort((a, b) => a - b),
     grid,
     startBar: fromBar - 1,
@@ -117,7 +125,7 @@ export function ImportPage() {
     }, 350);
     return () => clearTimeout(t);
     // options() reads exactly these values.
-  }, [upload, parts, grid, fromBar, toBar, velocity]);
+  }, [upload, mode, parts, grid, fromBar, toBar, velocity]);
 
   const doImport = async () => {
     if (!upload) return;
@@ -127,6 +135,7 @@ export function ImportPage() {
       const r = await api<MidiImportResponse>('POST', `/api/midi/${upload.id}/import`, {
         ...options(),
         title: title.trim() || titleFromFile(upload.fileName),
+        midiType,
         visibility,
       });
       navigate(`/songs/${r.song.id}`);
@@ -279,6 +288,35 @@ export function ImportPage() {
 
             <div className="import-options">
               <label className="field">
+                <span className="field-label">Mode</span>
+                <select
+                  className="input compact"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as ImportMode)}
+                >
+                  <option value="faithful">Faithful: note for note</option>
+                  <option value="essence">Essence: loops and sections</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="field-label">
+                  Type
+                  {midiType === a.classification.type && ' (detected)'}
+                </span>
+                <select
+                  className="input compact"
+                  value={midiType}
+                  title={a.classification.reasons.join(', ')}
+                  onChange={(e) => setMidiType(e.target.value as MidiType)}
+                >
+                  {MIDI_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {MIDI_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
                 <span className="field-label">Grid</span>
                 <select
                   className="input compact"
@@ -351,6 +389,13 @@ export function ImportPage() {
               </span>
             </div>
             {previewError && <p className="alert error small">{previewError}</p>}
+            {preview?.form && (
+              <p className="muted small form-line">
+                Form: {preview.form.map((s) => `${s.label} (${s.bars})`).join(' ')}
+                {preview.keptNotes !== undefined &&
+                  ` · ${preview.keptNotes} of ${preview.stats.notes} notes written out`}
+              </p>
+            )}
             {preview && preview.warnings.length > 0 && (
               <ul className="alert warn small import-warnings">
                 {preview.warnings.map((w) => (

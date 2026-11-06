@@ -1,5 +1,6 @@
 // Database access for songs and their versions. Every version is immutable: saving creates a new one.
 import type {
+  MusicBrief,
   SongDto,
   SongSummaryDto,
   UserRefDto,
@@ -21,6 +22,7 @@ export interface SongRow {
   forked_from_song_id: number | null;
   forked_from_version_id: number | null;
   midi_upload_id: number | null;
+  brief: string | null;
   current_version_id: number;
   created_at: number;
   updated_at: number;
@@ -131,7 +133,12 @@ export const songs = {
     const row = db.prepare(`${SONG_SELECT} WHERE s.id = ?`).get(song.id) as unknown as SongListRow;
     const current = versions.byId(db, song.current_version_id)!;
     const summary = toSummary(row, viewer);
-    return { ...summary, currentVersion: toVersion(current), canEdit: canEdit(song, viewer) };
+    return {
+      ...summary,
+      currentVersion: toVersion(current),
+      canEdit: canEdit(song, viewer),
+      brief: song.brief ? (JSON.parse(song.brief) as MusicBrief) : null,
+    };
   },
 
   create(
@@ -145,6 +152,7 @@ export const songs = {
       forkedFromSongId?: number;
       forkedFromVersionId?: number;
       midiUploadId?: number;
+      brief?: MusicBrief | null;
     },
   ): SongRow {
     return transaction(db, () => {
@@ -152,8 +160,8 @@ export const songs = {
       const r = db
         .prepare(
           `INSERT INTO songs (owner_id, title, visibility, forked_from_song_id, forked_from_version_id,
-                              midi_upload_id, current_version_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                              midi_upload_id, brief, current_version_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         )
         .run(
           s.ownerId,
@@ -162,6 +170,7 @@ export const songs = {
           s.forkedFromSongId ?? null,
           s.forkedFromVersionId ?? null,
           s.midiUploadId ?? null,
+          s.brief ? JSON.stringify(s.brief) : null,
           now,
           now,
         );
@@ -178,12 +187,13 @@ export const songs = {
     });
   },
 
-  update(db: Db, id: number, patch: { title?: string; visibility?: Visibility }): void {
+  update(db: Db, id: number, patch: { title?: string; visibility?: Visibility; brief?: MusicBrief }): void {
     const s = songs.byId(db, id);
     if (!s) return;
-    db.prepare('UPDATE songs SET title = ?, visibility = ?, updated_at = ? WHERE id = ?').run(
+    db.prepare('UPDATE songs SET title = ?, visibility = ?, brief = ?, updated_at = ? WHERE id = ?').run(
       patch.title ?? s.title,
       patch.visibility ?? s.visibility,
+      patch.brief ? JSON.stringify(patch.brief) : s.brief,
       Date.now(),
       id,
     );

@@ -259,6 +259,7 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 - Wykrywanie powtórzeń i sekcji; tryb essence.
 - Klasyfikacja typu MIDI z ręczną korektą.
 - Automatycznie wypełniona karta utworu (Music Brief) i widok/edycja karty.
+- (Zrobione w PR 5.) Essence: bloki 1–32 taktów grupowane podobieństwem (Jaccard ≥ 0,7), dla sekcji najczęstsza wersja każdego taktu, maks. 3 głosy, `const sekcja = ...` i `arrange([takty, sekcja], ...)`. Klasyfikacja to same heurystyki; doprecyzowanie przez agenta można dodać później. Karta to 14 pól tekstowych, zapisana przy utworze.
 - **Test:** ten sam plik w obu trybach; porównujesz długość i czytelność kodu oraz kartę utworu.
 
 ### Kamień milowy 3: agent

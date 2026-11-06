@@ -1,4 +1,5 @@
 // Analysis of a parsed MIDI file: parts (track × channel), tempo, meter, key, ranges.
+import { classifyMidi, type MidiClassification } from './classify';
 import { GM_DRUM_CHANNEL, gmProgramName, gmSoundForProgram } from './gm';
 import type { MidiFile, MidiNote } from './parse';
 
@@ -43,6 +44,7 @@ export interface MidiAnalysis {
   durationSeconds: number;
   noteCount: number;
   parts: MidiPart[];
+  classification: MidiClassification;
 }
 
 const PITCH_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -217,11 +219,13 @@ export function analyzeMidi(file: MidiFile): MidiAnalysis {
     (m, p) => p.notes.reduce((mm, n) => Math.max(mm, n.tick + n.duration), m),
     0,
   );
+  const tempoChanges = Math.max(0, distinct(file.tempos.map((t) => Math.round(t.bpm * 100))).length - 1);
+  const partInfo = parts.map((p) => p.part);
   return {
     format: file.format,
     ppq: file.ppq,
     bpm: Math.round((file.tempos[0]?.bpm ?? 120) * 100) / 100,
-    tempoChanges: Math.max(0, distinct(file.tempos.map((t) => Math.round(t.bpm * 100))).length - 1),
+    tempoChanges,
     timeSignature: { numerator: ts.numerator, denominator: ts.denominator },
     timeSignatureChanges: Math.max(
       0,
@@ -231,6 +235,7 @@ export function analyzeMidi(file: MidiFile): MidiAnalysis {
     bars: Math.max(1, Math.ceil(lastNoteEnd / tpb)),
     durationSeconds: Math.round(ticksToSeconds(file, lastNoteEnd) * 10) / 10,
     noteCount: parts.reduce((s, p) => s + p.notes.length, 0),
-    parts: parts.map((p) => p.part),
+    parts: partInfo,
+    classification: classifyMidi({ parts: partInfo, tempoChanges }),
   };
 }

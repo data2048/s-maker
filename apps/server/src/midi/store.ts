@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { MidiAnalysis, MidiUploadDto } from '@s-maker/shared';
+import { classifyMidi, type MidiAnalysis, type MidiUploadDto } from '@s-maker/shared';
 import type { Db } from '../db';
 
 /** Uploads kept per user; older ones are removed automatically (songs made from them stay). */
@@ -17,13 +17,18 @@ interface UploadRow {
 
 const COLUMNS = 'id, owner_id, file_name, size, sha256, analysis, created_at';
 
+/** Uploads stored before classification existed get it from their saved analysis. */
+function withClassification(a: MidiAnalysis): MidiAnalysis {
+  return a.classification ? a : { ...a, classification: classifyMidi(a) };
+}
+
 function toDto(r: UploadRow): MidiUploadDto {
   return {
     id: r.id,
     fileName: r.file_name,
     size: r.size,
     createdAt: new Date(r.created_at).toISOString(),
-    analysis: JSON.parse(r.analysis) as MidiAnalysis,
+    analysis: withClassification(JSON.parse(r.analysis) as MidiAnalysis),
   };
 }
 

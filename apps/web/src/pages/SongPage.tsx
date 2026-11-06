@@ -1,5 +1,6 @@
 import {
   parseTracks,
+  type MusicBrief,
   type SongDto,
   type VersionDto,
   type VersionSummaryDto,
@@ -8,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../api';
+import { BriefPanel } from '../components/BriefPanel';
 import { ErrorBox } from '../components/Form';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { Mixer } from '../components/Mixer';
@@ -51,6 +53,7 @@ export function SongPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
   const [title, setTitle] = useState('');
 
   const dirty = code !== savedCode;
@@ -130,11 +133,11 @@ export function SongPage() {
   const saveRef = useRef(save);
   saveRef.current = save;
 
-  const updateMeta = async (patch: { title?: string; visibility?: Visibility }) => {
+  const updateMeta = async (patch: { title?: string; visibility?: Visibility; brief?: MusicBrief }) => {
     if (!song) return;
     try {
       const s = await api<SongDto>('PATCH', `/api/songs/${song.id}`, patch);
-      setSong({ ...song, title: s.title, visibility: s.visibility });
+      setSong({ ...song, title: s.title, visibility: s.visibility, brief: s.brief });
       setTitle(s.title);
     } catch (e) {
       setError(errorMessage(e));
@@ -264,7 +267,24 @@ export function SongPage() {
             </button>
           </>
         )}
-        <button className="btn" onClick={() => setShowHistory((h) => !h)} aria-pressed={showHistory}>
+        <button
+          className="btn"
+          onClick={() => {
+            setShowBrief((b) => !b);
+            setShowHistory(false);
+          }}
+          aria-pressed={showBrief}
+        >
+          Brief
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            setShowHistory((h) => !h);
+            setShowBrief(false);
+          }}
+          aria-pressed={showHistory}
+        >
           History ({song.versionCount})
         </button>
         {canEdit && (
@@ -300,7 +320,7 @@ export function SongPage() {
         </div>
       )}
 
-      <div className={`song-grid ${showHistory ? 'with-history' : ''}`}>
+      <div className={`song-grid ${showHistory || showBrief ? 'with-history' : ''}`}>
         <Mixer parsed={parsed} code={code} readOnly={!canEdit} onChange={replaceCode} />
         <StrudelPlayer
           ref={player}
@@ -310,6 +330,15 @@ export function SongPage() {
           onSave={() => void saveRef.current()}
           className="strudel-frame song-frame"
         />
+        {showBrief && (
+          <BriefPanel
+            key={song.id}
+            brief={song.brief}
+            canEdit={canEdit}
+            onSave={(brief) => updateMeta({ brief })}
+            onClose={() => setShowBrief(false)}
+          />
+        )}
         {showHistory && (
           <HistoryPanel
             songId={song.id}

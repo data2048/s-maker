@@ -75,9 +75,53 @@ test('import a MIDI file: tracks, live preview, play, create a song', async ({ p
   await expect(page.getByLabel('Instrument of flute')).toHaveValue('gm_flute');
   await expect(page.getByLabel('Drum machine of drums')).toHaveValue('RolandTR909');
 
+  // The brief was filled in from the file and can be edited.
+  await page.getByRole('button', { name: 'Brief' }).click();
+  await expect(page.getByLabel('Tempo')).toHaveValue('104 BPM');
+  await expect(page.getByLabel('Meter')).toHaveValue('4/4');
+  await page.getByLabel('Style').fill('Lo-fi test');
+  await page.getByRole('button', { name: 'Save brief' }).click();
+  await expect(page.getByRole('button', { name: 'Saved', exact: true }).first()).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Brief' }).click();
+  await expect(page.getByLabel('Style')).toHaveValue('Lo-fi test');
+
   // The upload is listed for reuse
   await page.getByRole('link', { name: 'Import MIDI' }).first().click();
   await expect(page.getByRole('button', { name: 'demo song.mid', exact: true })).toBeVisible();
+});
+
+test('essence mode writes sections and plays', async ({ page }) => {
+  await login(page);
+  await page.goto('/import');
+  const notes = (bar: number, pitches: number[]) =>
+    pitches.map((pitch, i) => ({ tick: (bar * 4 + i) * Q, duration: Q, pitch, velocity: 90 }));
+  const A = [60, 62, 64, 65];
+  const B = [72, 71, 69, 67];
+  const buffer = Buffer.from(
+    writeMidi({
+      tracks: [
+        {
+          name: 'Lead',
+          program: 73,
+          notes: [0, 1, 2, 3, 4, 5, 6, 7].flatMap((bar) => notes(bar, bar === 4 || bar === 5 ? B : A)),
+        },
+      ],
+    }),
+  );
+  await page.locator('#midi-file').setInputFiles({ name: 'form.mid', mimeType: 'audio/midi', buffer });
+  await expect(page.getByLabel('Type (detected)')).toBeVisible();
+  await page.getByLabel('Mode').selectOption('essence');
+  await expect(page.getByText(/Form: A \(4\) B \(2\) A \(2\)/)).toBeVisible();
+  const player = playerFrame(page);
+  await expect(player.locator('.cm-content')).toContainText('arrange(', { timeout: 20_000 });
+  await player.getByRole('button', { name: 'Play' }).click();
+  await expect(page.getByText('● playing')).toBeVisible({ timeout: 30_000 });
+  await expect(player.locator('#error')).toBeHidden();
+  await player.getByRole('button', { name: 'Stop' }).click();
+  await page.getByRole('button', { name: 'Create song' }).click();
+  await expect(page).toHaveURL(/\/songs\/\d+$/);
+  await expect(page.locator('.track-name')).toHaveText(['lead']);
 });
 
 test('a broken file shows a clear error', async ({ page }) => {
