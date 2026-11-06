@@ -14,7 +14,7 @@ import type { Db } from '../db';
 import { forbidden, notFound, parse } from '../http-error';
 import { canEdit, canView, songs, versions } from '../songs/store';
 import { explainMessages } from './prompt';
-import { oneAtATime, parseBrief, streamEvents, textStreamer } from './routes';
+import { chosenModel, oneAtATime, parseBrief, streamEvents, textStreamer } from './routes';
 import { runText } from './service';
 
 const songParams = z.object({ id: z.coerce.number().int().positive() });
@@ -158,6 +158,7 @@ export async function explainRoutes(app: FastifyInstance): Promise<void> {
       const { id } = parse(songParams, request.params);
       const { song, user } = viewable(request, id);
       const body = parse(explainRequestSchema, request.body);
+      const model = chosenModel(request, body.model);
       const version = versions.get(db, song.id, body.versionId ?? song.current_version_id);
       if (!version) throw notFound('Version not found');
       const mayDelete = canEdit(song, user);
@@ -170,6 +171,7 @@ export async function explainRoutes(app: FastifyInstance): Promise<void> {
               request: `Explain, level ${body.level}${body.note ? `: ${body.note}` : ''}`,
               inputCode: version.code,
               tier: body.tier,
+              model,
               messages: explainMessages({
                 code: version.code,
                 brief: parseBrief(song.brief),

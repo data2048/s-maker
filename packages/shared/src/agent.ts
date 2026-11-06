@@ -12,6 +12,9 @@ export const MAX_REPAIRS = 2;
 export const MODEL_TIERS = ['fast', 'strong'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
 
+export const MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+const modelId = z.string().regex(MODEL_ID, 'Invalid model id').max(120);
+
 const code = z.string().min(1).max(MAX_CODE_LENGTH);
 const trackName = z.string().trim().min(1).max(40);
 
@@ -142,6 +145,8 @@ export const agentProposeRequestSchema = z.object({
   /** Limit the change to this section, a const in the header. */
   section: trackName.optional(),
   tier: z.enum(MODEL_TIERS).default('fast'),
+  /** A model from the admin's list, used instead of the tier. */
+  model: modelId.optional(),
   /** The code in the editor, which may have unsaved edits. */
   code: z.string().max(MAX_AGENT_CODE_LENGTH, 'This song is too long for the agent'),
   baseVersionId: z.number().int().positive(),
@@ -171,6 +176,7 @@ export interface AgentProposalDto {
 export const agentChatRequestSchema = z.object({
   message: z.string().trim().min(1, 'Write a message').max(MAX_INSTRUCTION_LENGTH),
   tier: z.enum(MODEL_TIERS).default('fast'),
+  model: modelId.optional(),
   /** The code in the editor, which may have unsaved edits. */
   code: z.string().max(MAX_AGENT_CODE_LENGTH, 'This song is too long for the agent'),
   baseVersionId: z.number().int().positive(),
@@ -183,6 +189,7 @@ export const composeRequestSchema = z
     description: z.string().trim().max(MAX_INSTRUCTION_LENGTH).default(''),
     brief: musicBriefSchema.default({}),
     tier: z.enum(MODEL_TIERS).default('strong'),
+    model: modelId.optional(),
   })
   .refine((r) => r.description || !isBriefEmpty(r.brief), {
     message: 'Describe the song or fill in at least one element',
@@ -233,6 +240,7 @@ export const explainRequestSchema = z.object({
   /** The song's current version if not given. */
   versionId: z.number().int().positive().optional(),
   tier: z.enum(MODEL_TIERS).default('fast'),
+  model: modelId.optional(),
 });
 export type ExplainRequest = z.input<typeof explainRequestSchema>;
 
@@ -262,8 +270,6 @@ export interface AgentUsageDto {
 
 // ---------- admin ----------
 
-export const MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
-
 export const agentSettingsSchema = z.object({
   modelFast: z.string().regex(MODEL_ID, 'Invalid model id').max(120),
   modelStrong: z.string().regex(MODEL_ID, 'Invalid model id').max(120),
@@ -273,6 +279,22 @@ export const agentSettingsSchema = z.object({
   globalWeeklyLimitUsd: z.number().min(0).max(1000),
 });
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
+
+/** A model that can be chosen by name, for comparing models. */
+export interface AgentModelOption {
+  id: string;
+  /** USD per million tokens; null when OpenRouter does not say. */
+  promptUsdPerM: number | null;
+  completionUsdPerM: number | null;
+}
+
+export interface AgentModelsDto {
+  /** Only the admin can choose a model by name, because others could use up the budget quickly. */
+  canPick: boolean;
+  models: AgentModelOption[];
+}
+
+export const pickableModelsSchema = z.object({ models: z.array(modelId).max(30) });
 
 export interface AgentCallDto {
   id: number;

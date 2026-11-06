@@ -257,4 +257,10 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    id: 9,
+    name: 'model chosen for a proposal',
+    // A repair must go to the same model as the proposal, or a comparison of models would mean nothing.
+    sql: `ALTER TABLE agent_proposals ADD COLUMN requested_model TEXT;`,
+  },
 ];

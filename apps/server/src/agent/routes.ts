@@ -6,8 +6,11 @@ import {
   agentSettingsSchema,
   composeRequestSchema,
   partialJsonString,
+  pickableModelsSchema,
   type AgentAdminDto,
   type AgentChatDto,
+  type AgentModelOption,
+  type AgentModelsDto,
   type AgentProposalDto,
   type AgentStreamEvent,
   type AgentUsageDto,
@@ -24,7 +27,7 @@ import { badRequest, conflict, forbidden, HttpError, notFound, parse } from '../
 import { canEdit, canView, songs, versions } from '../songs/store';
 import { chatMessages, composeMessages, proposeMessages, repairMessage } from './prompt';
 import { linkRun, runAgent } from './service';
-import { agentCalls, agentChat, agentSettings, proposalDto, proposals } from './store';
+import { agentCalls, agentChat, agentSettings, pickableModels, proposalDto, proposals } from './store';
 
 const songParams = z.object({ id: z.coerce.number().int().positive() });
 const proposalParams = songParams.extend({ proposalId: z.coerce.number().int().positive() });
@@ -41,6 +44,21 @@ export function ownSong(request: FastifyRequest, id: number) {
 }
 
 export const parseBrief = (brief: string | null) => (brief ? (JSON.parse(brief) as MusicBrief) : null);
+
+/** How long the list of models and prices from OpenRouter is reused. */
+const CATALOG_MS = 3600 * 1000;
+
+/**
+ * A model chosen by name. The server decides, not the page: only the admin may choose, and only from the
+ * admin's list, because other people could otherwise run up the budget with an expensive model.
+ */
+export function chosenModel(request: FastifyRequest, model: string | null | undefined): string | undefined {
+  if (!model) return undefined;
+  if (currentUser(request).role !== 'admin') throw forbidden('Only the admin can choose a model by name');
+  if (!pickableModels.get(request.server.db).includes(model))
+    throw badRequest(`"${model}" is not on the list of models`);
+  return model;
+}
 
 /** One request per user at a time: protects the budget from double clicks and parallel tabs. */
 const running = new Set<number>();
@@ -121,6 +139,28 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     return agentCalls.usage(db, currentUser(request).id, agentSettings.get(db, app.config), app.llm.enabled);
   });
 
+  let catalog: { at: number; models: AgentModelOption[] } | null = null;
+  const loadCatalog = async (): Promise<AgentModelOption[]> => {
+    if (catalog && Date.now() - catalog.at < CATALOG_MS) return catalog.models;
+    const models = app.llm.listCatalog
+      ? await app.llm.listCatalog()
+      : (await app.llm.listModels()).map((id) => ({ id, promptUsdPerM: null, completionUsdPerM: null }));
+    catalog = { at: Date.now(), models };
+    return models;
+  };
+
+  app.get('/api/agent/models', async (request): Promise<AgentModelsDto> => {
+    if (currentUser(request).role !== 'admin') return { canPick: false, models: [] };
+    // Without prices the list still works.
+    const known = await loadCatalog().catch(() => []);
+    return {
+      canPick: true,
+      models: pickableModels
+        .get(db)
+        .map((id) => known.find((m) => m.id === id) ?? { id, promptUsdPerM: null, completionUsdPerM: null }),
+    };
+  });
+
   app.post(
     '/api/songs/:id/agent/proposals',
     { config: agentRateLimit },
@@ -128,6 +168,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { id } = parse(songParams, request.params);
       const { song, user } = ownSong(request, id);
       const body = parse(agentProposeRequestSchema, request.body);
+      const model = chosenModel(request, body.model);
       const result = await oneAtATime(user.id, () =>
         runAgent(
           { app, userId: user.id, songId: song.id, purpose: body.track ? 'track' : 'song' },
@@ -135,6 +176,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
             request: body.instruction,
             baseCode: body.code,
             tier: body.tier,
+            model,
             messages: proposeMessages({
               code: body.code,
               brief: parseBrief(song.brief),
@@ -153,6 +195,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         instruction: body.instruction,
         track: body.track ?? null,
         tier: body.tier,
+        requestedModel: model,
         summary: result.answer.summary,
         baseCode: body.code,
         code: result.code,
@@ -181,6 +224,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = parse(songParams, request.params);
     const { song, user } = ownSong(request, id);
     const body = parse(agentChatRequestSchema, request.body);
+    const model = chosenModel(request, body.model);
     return streamEvents(request, reply, (send, signal) =>
       oneAtATime(user.id, async () => {
         send({ type: 'status', text: 'The agent is working…' });
@@ -195,6 +239,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
             request: body.message,
             baseCode: body.code,
             tier: body.tier,
+            model,
             messages: chatMessages({ code: body.code, brief, message: body.message, history }),
             onText: textStreamer(send, (raw) => partialJsonString(raw, 'reply') ?? ''),
             signal,
@@ -212,6 +257,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
               instruction: body.message,
               track: null,
               tier: body.tier,
+              requestedModel: model,
               summary: result.answer.summary,
               baseCode: body.code,
               code: result.code,
@@ -242,6 +288,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/agent/compose', { config: agentRateLimit }, async (request, reply) => {
     const user = currentUser(request);
     const body = parse(composeRequestSchema, request.body);
+    const model = chosenModel(request, body.model);
     return streamEvents(request, reply, (send, signal) =>
       oneAtATime(user.id, async () => {
         send({ type: 'status', text: 'The agent is composing…' });
@@ -251,6 +298,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
             request: body.description || 'Compose a song from the brief',
             baseCode: COMPOSE_BASE_CODE,
             tier: body.tier,
+            model,
             messages: composeMessages({ description: body.description, brief: body.brief }),
             signal,
           },
@@ -271,6 +319,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
           instruction: body.description || 'Compose a song from the brief',
           track: null,
           tier: body.tier,
+          requestedModel: model,
           summary: result.answer.summary,
           baseCode: COMPOSE_BASE_CODE,
           code: result.code,
@@ -315,6 +364,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       if (row.status !== 'pending') throw conflict('This proposal is already closed');
       if (row.repairs >= 2) throw new HttpError(422, 'The agent could not fix this proposal');
       const { error } = parse(agentRepairRequestSchema, request.body);
+      const model = chosenModel(request, row.requested_model);
       const messages = [
         ...proposeMessages({
           code: row.base_code,
@@ -340,6 +390,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
             proposalId: row.id,
             baseCode: row.base_code,
             tier: row.tier as ModelTier,
+            model,
             messages,
           },
         ),
@@ -405,6 +456,34 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       totalUsd: agentCalls.spentTotal(db),
       recent: agentCalls.recent(db),
     };
+  });
+
+  /** Every model OpenRouter offers, to choose from. */
+  app.get('/api/admin/agent/catalog', { preHandler: requireAdmin }, async () => {
+    if (!app.llm.enabled) return { models: [] };
+    try {
+      return { models: await loadCatalog() };
+    } catch {
+      throw new HttpError(502, 'Could not get the list of models from OpenRouter');
+    }
+  });
+
+  app.put('/api/admin/agent/models', { preHandler: requireAdmin }, async (request) => {
+    const models = [...new Set(parse(pickableModelsSchema, request.body).models)];
+    const before = pickableModels.get(db);
+    // Models already on the list may have disappeared from OpenRouter, and must stay removable.
+    const added = models.filter((m) => !before.includes(m));
+    if (added.length && app.llm.enabled) {
+      const known = new Set(await app.llm.listModels());
+      for (const m of added) if (!known.has(m)) throw badRequest(`OpenRouter has no model "${m}"`);
+    }
+    pickableModels.set(db, models);
+    audit.log(db, 'agent.models', {
+      userId: currentUser(request).id,
+      ip: request.ip,
+      details: { models },
+    });
+    return { models };
   });
 
   app.put('/api/admin/agent/settings', { preHandler: requireAdmin }, async (request) => {

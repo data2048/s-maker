@@ -3,11 +3,11 @@ import {
   EXPLANATION_LEVELS,
   MAX_EXPLANATION_NOTE_LENGTH,
   type ExplanationLevel,
-  type ModelTier,
   type SongExplanationDto,
 } from '@s-maker/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage, streamApi } from '../api';
+import { ModelSelect, useModelChoice } from './ModelSelect';
 import { renderMarkdown } from '../markdown';
 import { timeAgo } from '../pages/HomePage';
 
@@ -54,7 +54,7 @@ export function ExplainPanel({ songId, versionId, versionNumber, dirty, onSpent,
   const [open, setOpen] = useState<number | null>(null);
   const [level, setLevel] = useState<ExplanationLevel>('normal');
   const [note, setNote] = useState('');
-  const [tier, setTier] = useState<ModelTier>('fast');
+  const model = useModelChoice('fast');
   const [status, setStatus] = useState<string | null>(null);
   const [partial, setPartial] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -70,18 +70,22 @@ export function ExplainPanel({ songId, versionId, versionNumber, dirty, onSpent,
     setPartial('');
     setStatus('The agent is writing…');
     try {
-      await streamApi(`/api/songs/${songId}/explanations`, { level, note, tier, versionId }, (event) => {
-        if (event.type === 'status') setStatus(event.text);
-        else if (event.type === 'delta') setPartial((p) => p + event.text);
-        else if (event.type === 'reset') setPartial('');
-        else if (event.type === 'error') setError(event.error);
-        else if (event.type === 'done' && event.explanation) {
-          const made = event.explanation;
-          setItems((list) => [made, ...list]);
-          setOpen(made.id);
-          setNote('');
-        }
-      });
+      await streamApi(
+        `/api/songs/${songId}/explanations`,
+        { level, note, ...model.request, versionId },
+        (event) => {
+          if (event.type === 'status') setStatus(event.text);
+          else if (event.type === 'delta') setPartial((p) => p + event.text);
+          else if (event.type === 'reset') setPartial('');
+          else if (event.type === 'error') setError(event.error);
+          else if (event.type === 'done' && event.explanation) {
+            const made = event.explanation;
+            setItems((list) => [made, ...list]);
+            setOpen(made.id);
+            setNote('');
+          }
+        },
+      );
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -131,16 +135,7 @@ export function ExplainPanel({ songId, versionId, versionNumber, dirty, onSpent,
               </option>
             ))}
           </select>
-          <select
-            className="input compact"
-            value={tier}
-            onChange={(e) => setTier(e.target.value as ModelTier)}
-            aria-label="Explanation model"
-            disabled={!!status}
-          >
-            <option value="fast">Fast</option>
-            <option value="strong">Strong</option>
-          </select>
+          <ModelSelect choice={model} label="Explanation model" disabled={!!status} />
           <button className="btn primary small" disabled={!!status}>
             {status ?? `Explain v${versionNumber}`}
           </button>

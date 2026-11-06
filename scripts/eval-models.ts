@@ -181,7 +181,9 @@ function jobFromRun(task: AgentReplayTask): Job {
     name: `run ${task.runId} (${task.purpose}): ${task.request.replace(/\s+/g, ' ').slice(0, 60)}`,
     baseCode: task.baseCode,
     messages: task.messages,
-    maxTokens: MAX_TOKENS[task.tier as ModelTier] ?? MAX_TOKENS.fast,
+    // A chosen model ran with the larger limit.
+    maxTokens:
+      task.tier === 'picked' ? MAX_TOKENS.strong : (MAX_TOKENS[task.tier as ModelTier] ?? MAX_TOKENS.fast),
     text: task.purpose === 'explain',
     source: task,
   };

@@ -2,11 +2,11 @@ import {
   AGENT_PRIVACY_NOTE,
   type AgentChatMessageDto,
   type AgentStreamEvent,
-  type ModelTier,
   type MusicBrief,
 } from '@s-maker/shared';
 import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage, streamApi } from '../api';
+import { ModelSelect, useModelChoice } from './ModelSelect';
 import type { AgentProposalState } from './useAgentProposal';
 
 interface Props {
@@ -24,7 +24,7 @@ const STATUS_LABEL = { pending: 'waiting for you', accepted: 'accepted', rejecte
 export function ChatPanel({ songId, code, baseVersionId, agent, onBriefChanged, onClose }: Props) {
   const [messages, setMessages] = useState<AgentChatMessageDto[] | null>(null);
   const [text, setText] = useState('');
-  const [tier, setTier] = useState<ModelTier>('fast');
+  const model = useModelChoice('fast');
   const [status, setStatus] = useState<string | null>(null);
   const [partial, setPartial] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,11 @@ export function ChatPanel({ songId, code, baseVersionId, agent, onBriefChanged, 
       }
     };
     try {
-      await streamApi(`/api/songs/${songId}/agent/chat`, { message, tier, code, baseVersionId }, onEvent);
+      await streamApi(
+        `/api/songs/${songId}/agent/chat`,
+        { message, ...model.request, code, baseVersionId },
+        onEvent,
+      );
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -132,17 +136,12 @@ export function ChatPanel({ songId, code, baseVersionId, agent, onBriefChanged, 
             }
           }}
         />
-        <div className="row">
-          <select
-            className="input compact"
-            value={tier}
-            onChange={(e) => setTier(e.target.value as ModelTier)}
-            aria-label="Chat model"
+        <div className="row wrap">
+          <ModelSelect
+            choice={model}
+            label="Chat model"
             title="Strong costs more; use it for bigger changes"
-          >
-            <option value="fast">Fast</option>
-            <option value="strong">Strong</option>
-          </select>
+          />
           <span className="spacer" />
           <button className="btn primary small" disabled={busy || !text.trim()}>
             Send
