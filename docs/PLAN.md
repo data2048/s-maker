@@ -193,6 +193,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 - `users`, `invites`, `sessions`, `audit_log`
 - `songs`, `song_versions`, `midi_uploads`, `song_explanations`
 - `agent_calls` (log kosztów), `agent_proposals`, `agent_chat_messages`; ustawienia agenta w `app_meta`
+- od PR 13: `agent_runs`, `agent_run_attempts`, `agent_system_prompts`
 - od PR 10: `chat_channels` (`general` | `dm`), `chat_members`, `chat_messages` (z opcjonalnym `songId`)
 - od PR 11: `wall_posts`, `wall_comments`
 
@@ -202,7 +203,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 
 Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./deploy.sh <branch>`) → merge do `main`.
 
-**Stan (2026-11-06):** PR 0–8 scalone do `main`, PR 12 zrobiony przed PR 9–11. Następny: PR 9. Zaległości są na końcu tej sekcji.
+**Stan (2026-11-06):** PR 0–8 i PR 12 scalone do `main`. W toku: PR 13 (logi agenta). PR 9–11 są odłożone na prośbę użytkownika: najpierw trzeba poprawić wyniki agenta. Zaległości są na końcu tej sekcji.
 
 ### Kamień milowy 1: działa i gra
 
@@ -304,7 +305,23 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 - Decyzje: objaśnienie może zamówić każdy, kto widzi utwór, i płaci z własnego limitu; usunąć je może autor albo właściciel utworu.
 - **Test:** prosisz o objaśnienie „krótko” i „szczegółowo”, oba widoczne przy utworze.
 
+#### PR 13: Logi przebiegów agenta
+
+Numer jest późniejszy, ale PR powstaje przed PR 9. Użytkownik testuje agenta na serwerze i potrzebuje pełnej historii, żeby znaleźć przyczyny słabych wyników i próbować innych modeli na wybranych przebiegach.
+
+- Przebieg to jedna prośba do agenta (propozycja, czat, komponowanie, naprawa, objaśnienie), a próba to jedno wywołanie modelu w tym przebiegu. Zapisane są: kto, utwór, propozycja, cel, poziom modelu, prośba, kod wejściowy i wynikowy, status, błąd, wysłane wiadomości, widoczna odpowiedź, powód odrzucenia przez `checkAnswer`, finish reason, tokeny, koszt i czas. Prompt systemowy jest zapisany raz, pod hashem.
+- Akceptacja lub odrzucenie jest czytane z `agent_proposals`, a nie kopiowane. Błąd zapisu logu trafia tylko do logu serwera i nie przerywa odpowiedzi agenta.
+- **Tekst myślenia modelu nie jest pobierany ani zapisywany:** zostaje `reasoning: { exclude: true }`, a z `usage` czytamy tylko liczbę tokenów myślenia i tokenów z cache'u, jeśli dostawca je podaje.
+- Panel admina (zakładka agenta): tabela, szczegóły, zaznaczanie, notatka, historia jednego utworu w kolejności czasu (przebiegi i wersje, także ręczne poprawki), pobieranie. Treść jest pokazywana wyłącznie jako tekst.
+- Eksport JSON: zaznaczone przebiegi albo cały utwór z wersjami, bez nazw użytkowników, z wpisem w audit logu. Pliki trzymamy w `kb/raw/` (poza repo). `scripts/eval-models.ts --from <plik>` odtwarza je na wskazanych modelach, a `--list` pokazuje zawartość bez płacenia.
+- Retencja: niezaznaczone przebiegi znikają po 90 dniach. Usunięcie utworu usuwa też jego przebiegi, nawet zaznaczone; zostaje tylko to, co wcześniej pobrano. Historia i eksport utworu działają tylko dla utworów, na których użyto agenta.
+- Wynika z tego zmiana zasad: admin widzi prośby i kod wysyłane do agenta, także z prywatnych utworów. Do tej pory nie miał dostępu do cudzych prywatnych utworów. Informacja jest w UI agenta i w `SECURITY.md`.
+- Znane ograniczenia: tokeny dotyczą ostatniej odpowiedzi w próbie, a koszt obejmuje też ponowienia przy zajętym dostawcy. Przerwany strumień nie zapisuje kosztu ani tokenów (ta sama zaległość co niżej).
+- **Test:** prosisz agenta o zmianę, otwierasz przebieg w panelu, zaznaczasz go, pobierasz plik i odtwarzasz go przez `--from`.
+
 ### Kamień milowy 4: społeczność
+
+Odłożony na prośbę użytkownika: PR 9–11 wracają po PR 13 i poprawie wyników agenta.
 
 #### PR 9: Udostępnianie
 

@@ -16,11 +16,19 @@ export interface ChatRequest {
   onText?(textSoFar: string): void;
 }
 
-export interface ChatResult {
-  content: string;
-  model: string;
+/** What a provider reports about a response. Only counts: the text of a model's thinking is never read. */
+export interface ResponseInfo {
   promptTokens: number;
   completionTokens: number;
+  /** Null when the provider does not say. */
+  reasoningTokens: number | null;
+  cachedTokens: number | null;
+  finishReason: string | null;
+}
+
+export interface ChatResult extends ResponseInfo {
+  content: string;
+  model: string;
   costUsd: number;
 }
 
@@ -38,6 +46,10 @@ export class LlmError extends Error {
     public readonly retryable: boolean,
     /** What the failed attempts cost: a model can charge for an answer it never finished. */
     public readonly costUsd: number = 0,
+    /** About the last response, if there was one: why an answer came back empty, for example. */
+    public readonly info: ResponseInfo | null = null,
+    /** The provider's own words, for the admin's log. */
+    public readonly providerMessage: string | null = null,
   ) {
     super(message);
   }
@@ -46,7 +58,7 @@ export class LlmError extends Error {
 interface ChatResponse {
   error?: { message?: string; code?: number };
   model?: string;
-  choices?: { message?: { content?: string | null } }[];
+  choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
   usage?: Usage;
 }
 
@@ -59,12 +71,15 @@ async function readStream(
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
+  let finishReason: string | null = null;
   const handle = (line: string) => {
     // Other lines are comments that keep the connection open.
     if (!line.startsWith('data:')) return;
     const payload = line.slice(5).trim();
     if (payload === '[DONE]') return;
-    let chunk: ChatResponse & { choices?: { delta?: { content?: string | null } }[] };
+    let chunk: ChatResponse & {
+      choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+    };
     try {
       chunk = JSON.parse(payload) as typeof chunk;
     } catch {
@@ -73,6 +88,7 @@ async function readStream(
     if (chunk.error) out.error = chunk.error;
     if (chunk.model) out.model = chunk.model;
     if (chunk.usage) out.usage = chunk.usage;
+    finishReason = chunk.choices?.[0]?.finish_reason ?? finishReason;
     const delta = chunk.choices?.[0]?.delta?.content;
     if (delta) {
       content += delta;
@@ -86,7 +102,7 @@ async function readStream(
     lines.forEach(handle);
   }
   handle(buffer);
-  out.choices = [{ message: { content } }];
+  out.choices = [{ message: { content }, finish_reason: finishReason }];
   return out;
 }
 
@@ -97,6 +113,8 @@ interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
   cost?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
 }
 
 /** Without a reported cost, count a high price so that the limits stay on the safe side. */
@@ -104,6 +122,14 @@ const costOf = (usage: Usage | undefined): number =>
   usage
     ? (usage.cost ?? ((usage.prompt_tokens ?? 0) * 2 + (usage.completion_tokens ?? 0) * 10) / 1_000_000)
     : 0;
+
+const infoOf = (data: ChatResponse): ResponseInfo => ({
+  promptTokens: data.usage?.prompt_tokens ?? 0,
+  completionTokens: data.usage?.completion_tokens ?? 0,
+  reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens ?? null,
+  cachedTokens: data.usage?.prompt_tokens_details?.cached_tokens ?? null,
+  finishReason: data.choices?.[0]?.finish_reason ?? null,
+});
 
 export function createOpenRouterClient(opts: {
   apiKey: string | undefined;
@@ -178,20 +204,25 @@ export function createOpenRouterClient(opts: {
         spent += costOf(data?.usage);
         // OpenRouter also reports provider errors with status 200.
         if (!data || data.error) {
-          last = new LlmError('The model provider returned an error', true, spent);
+          last = new LlmError(
+            'The model provider returned an error',
+            true,
+            spent,
+            data ? infoOf(data) : null,
+            data?.error?.message?.slice(0, 500) ?? null,
+          );
           continue;
         }
         const content = data.choices?.[0]?.message?.content;
         if (!content) {
           // Usually the token limit was used up on thinking, before the answer began.
-          last = new LlmError('The model returned an empty answer', true, spent);
+          last = new LlmError('The model returned an empty answer', true, spent, infoOf(data));
           continue;
         }
         return {
           content,
           model: data.model ?? req.model,
-          promptTokens: data.usage?.prompt_tokens ?? 0,
-          completionTokens: data.usage?.completion_tokens ?? 0,
+          ...infoOf(data),
           costUsd: spent,
         };
       }

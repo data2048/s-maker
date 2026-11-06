@@ -202,4 +202,59 @@ export const migrations: Migration[] = [
       CREATE INDEX song_explanations_song ON song_explanations(song_id, id);
     `,
   },
+  {
+    id: 8,
+    name: 'agent run logs',
+    // A run is one request to the agent; each model call in it is an attempt. Decisions on proposals are
+    // read from agent_proposals. The text of a model's thinking is never stored, only its token count.
+    sql: `
+      CREATE TABLE agent_system_prompts (
+        hash TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE agent_runs (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        song_id INTEGER REFERENCES songs(id) ON DELETE CASCADE,
+        proposal_id INTEGER REFERENCES agent_proposals(id) ON DELETE SET NULL,
+        purpose TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        request TEXT NOT NULL,
+        input_code TEXT,
+        output_code TEXT,
+        status TEXT NOT NULL CHECK (status IN ('running', 'ok', 'failed', 'cancelled')),
+        error TEXT,
+        flagged INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        finished_at INTEGER
+      );
+      CREATE INDEX agent_runs_at ON agent_runs(created_at);
+      CREATE INDEX agent_runs_song ON agent_runs(song_id, id);
+      CREATE INDEX agent_runs_flagged ON agent_runs(flagged, id);
+
+      CREATE TABLE agent_run_attempts (
+        id INTEGER PRIMARY KEY,
+        run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        number INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        system_prompt_hash TEXT REFERENCES agent_system_prompts(hash),
+        messages TEXT NOT NULL,
+        answer TEXT,
+        rejection TEXT,
+        error TEXT,
+        finish_reason TEXT,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        reasoning_tokens INTEGER,
+        cached_tokens INTEGER,
+        cost_usd REAL NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE (run_id, number)
+      );
+    `,
+  },
 ];

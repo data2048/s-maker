@@ -1,4 +1,5 @@
 import {
+  AGENT_PRIVACY_NOTE,
   isBriefEmpty,
   MAX_BRIEF_ELEMENT_LENGTH,
   MUSIC_ELEMENT_HINTS,
@@ -83,6 +84,7 @@ export function ComposePage() {
         Describe the song, fill in any of the elements, or both. The agent decides the rest. You listen to the
         first version before it is saved.
       </p>
+      <p className="muted small agent-privacy">{AGENT_PRIVACY_NOTE}</p>
       <ErrorBox error={error} />
       <label className="field">
         <span className="field-label">Title (optional)</span>

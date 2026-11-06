@@ -13,4 +13,5 @@ export * from './brief';
 export * from './songs';
 export * from './diff';
 export * from './agent';
+export * from './agent-runs';
 export * from './midi';

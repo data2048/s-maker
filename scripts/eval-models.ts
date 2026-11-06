@@ -5,11 +5,28 @@
 //   npx tsx --env-file=.env scripts/eval-models.ts deepseek/deepseek-v4.1-flash z-ai/glm-5.3
 //
 // Writes every answer to kb/raw/eval-<date>.json (not committed), to read and to listen to.
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+//
+// To send real requests to other models, download runs in the admin panel (Admin > agent), keep the file in
+// kb/raw/ (not committed: it holds what people wrote) and replay it:
+//
+//   npx tsx scripts/eval-models.ts --from kb/raw/s-maker-marked-runs.json --list      (free: shows what is in it)
+//   npx tsx --env-file=.env scripts/eval-models.ts --from kb/raw/s-maker-marked-runs.json z-ai/glm-5.3
+//
+// Replaying calls the models, which costs money. --out <file> writes the results somewhere else.
+// OPENROUTER_BASE_URL points it at another address, such as the fake model in e2e/fake-llm.ts.
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize } from 'node:path';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import { chromium } from '@playwright/test';
-import { NEW_SONG_CODE, parseTracks, type AgentAnswer } from '@s-maker/shared';
+import {
+  NEW_SONG_CODE,
+  parseTracks,
+  replayTasksFrom,
+  type AgentAnswer,
+  type AgentReplayTask,
+  type ModelTier,
+} from '@s-maker/shared';
 import { createOpenRouterClient, LlmError, type ChatMessage } from '../apps/server/src/agent/openrouter';
 import { proposeMessages, repairMessage } from '../apps/server/src/agent/prompt';
 import { checkAnswer, MAX_TOKENS } from '../apps/server/src/agent/service';
@@ -137,11 +154,76 @@ async function startSandboxServer(): Promise<{ url: string; close(): void }> {
   return { url: `http://127.0.0.1:${address.port}/`, close: () => server.close() };
 }
 
-const models = process.argv.slice(2);
+const { values: args, positionals: models } = parseArgs({
+  allowPositionals: true,
+  options: {
+    from: { type: 'string' },
+    list: { type: 'boolean', default: false },
+    out: { type: 'string' },
+  },
+});
+
+/** What is sent to each model and how the answer is judged. */
+interface Job {
+  name: string;
+  baseCode: string;
+  messages: ChatMessage[];
+  maxTokens: number;
+  /** A logged explanation: free text, with nothing to check or run. */
+  text: boolean;
+  expect?: RegExp;
+  untouched?: string[];
+  source?: AgentReplayTask;
+}
+
+function jobFromRun(task: AgentReplayTask): Job {
+  return {
+    name: `run ${task.runId} (${task.purpose}): ${task.request.replace(/\s+/g, ' ').slice(0, 60)}`,
+    baseCode: task.baseCode,
+    messages: task.messages,
+    maxTokens: MAX_TOKENS[task.tier as ModelTier] ?? MAX_TOKENS.fast,
+    text: task.purpose === 'explain',
+    source: task,
+  };
+}
+
+function jobFromTask(task: Task): Job {
+  const baseCode = task.code ?? NEW_SONG_CODE;
+  return {
+    name: task.name,
+    baseCode,
+    messages: proposeMessages({
+      code: baseCode,
+      brief: null,
+      instruction: task.instruction,
+      ...(task.track ? { track: task.track } : {}),
+    }),
+    maxTokens: MAX_TOKENS.fast,
+    text: false,
+    ...(task.expect ? { expect: task.expect } : {}),
+    ...(task.untouched ? { untouched: task.untouched } : {}),
+  };
+}
+
+const jobs = args.from
+  ? replayTasksFrom(JSON.parse(readFileSync(resolve(args.from), 'utf8'))).map(jobFromRun)
+  : TASKS.map(jobFromTask);
+
+if (args.list) {
+  for (const job of jobs) {
+    const was = job.source;
+    console.log(
+      `${job.name}${was ? ` | was ${was.original.model}, ${was.original.status}${was.original.decision ? `, ${was.original.decision}` : ''}, $${was.original.costUsd.toFixed(4)}` : ''}`,
+    );
+  }
+  console.log(`\n${jobs.length} requests. Name models to send them.`);
+  process.exit(0);
+}
+
 if (!models.length) throw new Error('Name the models to compare');
 const llm = createOpenRouterClient({
   apiKey: process.env.OPENROUTER_API_KEY,
-  baseUrl: 'https://openrouter.ai/api/v1',
+  baseUrl: process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
   publicUrl: 'https://github.com/data2048/s-maker',
 });
 
@@ -208,34 +290,44 @@ interface Row {
   problem: string | null;
   answer: AgentAnswer | null;
   code: string | null;
+  /** The answer as written, for an explanation. */
+  text: string | null;
+  /** What the logged run did, for comparison. */
+  original: AgentReplayTask['original'] | null;
 }
 
 const rows: Row[] = [];
 for (const model of models) {
-  for (const task of TASKS) {
-    const baseCode = task.code ?? NEW_SONG_CODE;
-    const messages: ChatMessage[] = proposeMessages({
-      code: baseCode,
-      brief: null,
-      instruction: task.instruction,
-      ...(task.track ? { track: task.track } : {}),
-    });
+  for (const task of jobs) {
+    const { baseCode } = task;
+    const messages: ChatMessage[] = [...task.messages];
     const started = Date.now();
     let costUsd = 0;
     let attempts = 0;
     let problem: string | null = 'no answer';
     let answer: AgentAnswer | null = null;
     let code: string | null = null;
+    let text: string | null = null;
     while (attempts < 3) {
       attempts++;
       let content: string;
       try {
-        const r = await llm.chat({ model, messages, maxTokens: MAX_TOKENS.fast, json: true });
+        const r = await llm.chat({
+          model,
+          messages,
+          maxTokens: task.maxTokens,
+          ...(task.text ? {} : { json: true }),
+        });
         costUsd += r.costUsd;
         content = r.content;
       } catch (e) {
         if (e instanceof LlmError) costUsd += e.costUsd;
         problem = e instanceof Error ? e.message : String(e);
+        break;
+      }
+      if (task.text) {
+        text = content;
+        problem = null;
         break;
       }
       try {
@@ -258,7 +350,19 @@ for (const model of models) {
         problem = 'followed the injection';
     }
     const seconds = Math.round((Date.now() - started) / 100) / 10;
-    rows.push({ model, task: task.name, ok: !problem, attempts, costUsd, seconds, problem, answer, code });
+    rows.push({
+      model,
+      task: task.name,
+      ok: !problem,
+      attempts,
+      costUsd,
+      seconds,
+      problem,
+      answer,
+      code,
+      text,
+      original: task.source?.original ?? null,
+    });
     console.log(
       `${problem ? 'FAIL' : 'ok  '} ${model} | ${task.name} | tries ${attempts} | $${costUsd.toFixed(4)} | ${seconds}s${problem ? ` | ${problem.split('\n')[0]!.slice(0, 100)}` : ''}`,
     );
@@ -275,7 +379,12 @@ for (const model of models) {
     `${model} | ${r.filter((x) => x.ok).length}/${r.length} | ${r.filter((x) => x.ok && x.attempts === 1).length} | $${r.reduce((s, x) => s + x.costUsd, 0).toFixed(3)} | ${(r.reduce((s, x) => s + x.seconds, 0) / r.length).toFixed(1)}`,
   );
 }
-mkdirSync(join(process.cwd(), 'kb/raw'), { recursive: true });
-const out = join(process.cwd(), `kb/raw/eval-${new Date().toISOString().slice(0, 10)}.json`);
+const out = args.out
+  ? resolve(args.out)
+  : join(
+      process.cwd(),
+      `kb/raw/eval-${new Date().toISOString().slice(0, 10)}${args.from ? '-replay' : ''}.json`,
+    );
+mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify(rows, null, 2));
 console.log(`\nAnswers: ${out}`);

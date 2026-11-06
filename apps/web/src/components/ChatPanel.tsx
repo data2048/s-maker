@@ -1,4 +1,10 @@
-import type { AgentChatMessageDto, AgentStreamEvent, ModelTier, MusicBrief } from '@s-maker/shared';
+import {
+  AGENT_PRIVACY_NOTE,
+  type AgentChatMessageDto,
+  type AgentStreamEvent,
+  type ModelTier,
+  type MusicBrief,
+} from '@s-maker/shared';
 import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage, streamApi } from '../api';
 import type { AgentProposalState } from './useAgentProposal';
@@ -103,6 +109,7 @@ export function ChatPanel({ songId, code, baseVersionId, agent, onBriefChanged, 
         <div ref={end} />
       </div>
       {error && <p className="alert error small">{error}</p>}
+      <p className="muted small agent-privacy">{AGENT_PRIVACY_NOTE}</p>
       <form
         className="chat-form"
         onSubmit={(e) => {
