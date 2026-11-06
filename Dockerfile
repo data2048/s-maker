@@ -35,6 +35,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY apps/server/package.json ./apps/server/package.json
 COPY --from=build /src/apps/server/dist ./apps/server/dist
 COPY --from=build /src/apps/web/dist ./apps/web/dist
+COPY kb/strudel-cheatsheet.md kb/music-elements.md ./kb/
 RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 44566

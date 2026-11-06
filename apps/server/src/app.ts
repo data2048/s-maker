@@ -8,6 +8,9 @@ import type { Config } from './config';
 import type { Db } from './db';
 import authPlugin from './auth/plugin';
 import { authRoutes } from './auth/routes';
+import { agentRoutes } from './agent/routes';
+import { createOpenRouterClient, type LlmClient } from './agent/openrouter';
+import { HttpError } from './http-error';
 import { midiRoutes } from './midi/routes';
 import { songRoutes } from './songs/routes';
 import { healthRoutes } from './routes/health';
@@ -16,16 +19,19 @@ import { applySandboxHeaders, SANDBOX_PATH } from './sandbox-headers';
 export interface AppDeps {
   config: Config;
   db: Db;
+  /** The model client; tests pass a fake. */
+  llm?: LlmClient;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     config: Config;
     db: Db;
+    llm: LlmClient;
   }
 }
 
-export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, db, llm }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger:
       config.env === 'test'
@@ -42,6 +48,15 @@ export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance
 
   app.decorate('config', config);
   app.decorate('db', db);
+  app.decorate(
+    'llm',
+    llm ??
+      createOpenRouterClient({
+        apiKey: config.openRouterApiKey,
+        baseUrl: config.openRouterBaseUrl,
+        publicUrl: config.publicUrl,
+      }),
+  );
 
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
@@ -68,21 +83,30 @@ export async function buildApp({ config, db }: AppDeps): Promise<FastifyInstance
   // Never leak internals (stack traces, SQL) to the client.
   app.setErrorHandler<FastifyError>((error, request, reply) => {
     const status = error.statusCode ?? 500;
-    if (status >= 500) {
+    // Our own 502/503 say what is wrong with the model provider, and contain no internals.
+    if (status >= 500 && !(error instanceof HttpError && status !== 500)) {
       request.log.error({ err: error }, 'request failed');
       return reply.status(status).send({ error: 'Internal Server Error' });
     }
     return reply.status(status).send({ error: error.message });
   });
 
-  // Generous global limit per client IP; auth endpoints set stricter limits per route.
-  await app.register(fastifyRateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+  // Generous limit per client IP for the API; auth endpoints set stricter limits per route.
+  // Static files are not counted: one load of the player is many files, and behind a proxy
+  // without TRUST_PROXY the whole group shares one address.
+  await app.register(fastifyRateLimit, {
+    global: true,
+    max: 600,
+    timeWindow: '1 minute',
+    allowList: (request) => !request.url.startsWith('/api/'),
+  });
 
   await app.register(healthRoutes);
   await app.register(authPlugin);
   await app.register(authRoutes);
   await app.register(songRoutes);
   await app.register(midiRoutes);
+  await app.register(agentRoutes);
 
   const webDist = config.webDist;
   if (webDist && existsSync(join(webDist, 'index.html'))) {

@@ -29,6 +29,8 @@ interface Props {
   readOnly?: boolean;
   /** Apply an edited version of the song code. */
   onChange(code: string): void;
+  /** Asks the agent about one track. */
+  onAskAgent?(track: string): void;
 }
 
 function InstrumentSelect({
@@ -82,7 +84,7 @@ function InstrumentSelect({
   );
 }
 
-export function Mixer({ parsed, code, readOnly, onChange }: Props) {
+export function Mixer({ parsed, code, readOnly, onChange, onAskAgent }: Props) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [template, setTemplate] = useState('melody');
@@ -221,6 +223,16 @@ export function Mixer({ parsed, code, readOnly, onChange }: Props) {
                   }}
                 >
                   {t.name === '$' ? `track ${t.index + 1}` : t.name}
+                </button>
+              )}
+              {!readOnly && onAskAgent && (
+                <button
+                  className="icon-btn"
+                  title="Ask the agent to change this track"
+                  aria-label={`Ask agent about ${t.name}`}
+                  onClick={() => onAskAgent(t.name)}
+                >
+                  ✦
                 </button>
               )}
               {!readOnly && (

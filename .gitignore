@@ -16,3 +16,4 @@ playwright-report/
 test-results/
 .claude/settings.local.json
 .claude/launch.json
+kb/raw/

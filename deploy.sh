@@ -45,7 +45,7 @@ main() {
   local BACKUP_DIR="$DEPLOY_ROOT/backups"
 
   # Variables required in .env. New PRs append to this list.
-  local REQUIRED_VARS=(PUBLIC_URL ADMIN_USERNAME)
+  local REQUIRED_VARS=(PUBLIC_URL ADMIN_USERNAME OPENROUTER_API_KEY)
 
   # ---- helpers ----
   log() { printf '\033[1;35m[deploy]\033[0m %s\n' "$*"; }

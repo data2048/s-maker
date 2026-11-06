@@ -204,6 +204,12 @@ export function setTrackBank(code: string, index: number, bank: string): string 
   return replaceRange(code, [t.bodyRange[1], t.bodyRange[1]], `.bank(${JSON.stringify(bank)})`);
 }
 
+/** Replaces the pattern of a track, keeping its label. */
+export function setTrackBody(code: string, index: number, body: string): string {
+  const t = getTrack(code, index);
+  return replaceRange(code, t.bodyRange, body.trim());
+}
+
 /** Removes a track and the blank line that separated it from the next one. */
 export function removeTrack(code: string, index: number): string {
   const t = getTrack(code, index);

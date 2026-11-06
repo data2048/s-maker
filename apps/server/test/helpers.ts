@@ -1,4 +1,5 @@
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { LlmClient } from '../src/agent/openrouter';
 import { buildApp } from '../src/app';
 import { bootstrapAdmin } from '../src/auth/bootstrap';
 import { loadConfig, type Config } from '../src/config';
@@ -13,10 +14,10 @@ const silentLog = {
   error: () => {},
 } as unknown as FastifyInstance['log'];
 
-export async function createTestApp(overrides: Partial<Config> = {}) {
+export async function createTestApp(overrides: Partial<Config> = {}, llm?: LlmClient) {
   const config = { ...loadConfig({ NODE_ENV: 'test', ADMIN_USERNAME: 'admin' }), ...overrides };
   const db = openDatabase(':memory:');
-  const app = await buildApp({ config, db });
+  const app = await buildApp({ config, db, ...(llm ? { llm } : {}) });
   return { app, db, config };
 }
 

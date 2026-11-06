@@ -1,3 +1,4 @@
+import { agentSettingsSchema, type AgentSettings } from '@s-maker/shared';
 import { z } from 'zod';
 
 const logLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -12,6 +13,13 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(logLevels).default('info'),
   WEB_DIST: z.string().optional(),
   APP_VERSION: z.string().default('dev'),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.url().default('https://openrouter.ai/api/v1'),
+  MODEL_FAST: z.string().default('deepseek/deepseek-v4.1-flash'),
+  MODEL_STRONG: z.string().default('deepseek/deepseek-v4-pro-0813'),
+  MODEL_FALLBACK: z.string().default('z-ai/glm-5.3'),
+  AGENT_USER_WEEKLY_USD: z.coerce.number().min(0).default(3),
+  AGENT_GLOBAL_WEEKLY_USD: z.coerce.number().min(0).default(10),
   ADMIN_USERNAME: z
     .string()
     .regex(/^[a-z0-9_.-]{3,32}$/i)
@@ -33,6 +41,10 @@ export interface Config {
   webDist: string | undefined;
   version: string;
   adminUsername: string | undefined;
+  openRouterApiKey: string | undefined;
+  openRouterBaseUrl: string;
+  /** Starting values; the admin can change them in the app. */
+  agentDefaults: AgentSettings;
 }
 
 function parseTrustProxy(value: string | undefined): Config['trustProxy'] {
@@ -69,6 +81,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: e.LOG_LEVEL,
     webDist: e.WEB_DIST,
     version: e.APP_VERSION,
+    openRouterApiKey: e.OPENROUTER_API_KEY || undefined,
+    openRouterBaseUrl: e.OPENROUTER_BASE_URL,
+    agentDefaults: agentSettingsSchema.parse({
+      modelFast: e.MODEL_FAST,
+      modelStrong: e.MODEL_STRONG,
+      modelFallback: e.MODEL_FALLBACK,
+      userWeeklyLimitUsd: e.AGENT_USER_WEEKLY_USD,
+      globalWeeklyLimitUsd: e.AGENT_GLOBAL_WEEKLY_USD,
+    }),
     adminUsername: e.ADMIN_USERNAME,
   };
 }

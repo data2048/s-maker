@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FAKE_LLM_PORT, startFakeLlm } from './fake-llm';
 
 export const STATE_FILE = join(tmpdir(), 's-maker-e2e-state.json');
 /** Session cookie of the first login, reused by later tests. */
@@ -12,6 +13,7 @@ const PORT = 44577;
 
 export default async function globalSetup(): Promise<void> {
   rmSync(SESSION_FILE, { force: true });
+  startFakeLlm();
   const dataDir = mkdtempSync(join(tmpdir(), 's-maker-e2e-'));
   const child = spawn(
     process.execPath,
@@ -27,6 +29,8 @@ export default async function globalSetup(): Promise<void> {
         WEB_DIST: join(process.cwd(), 'apps/web/dist'),
         ADMIN_USERNAME: 'e2e-admin',
         LOG_LEVEL: 'warn',
+        OPENROUTER_API_KEY: 'e2e-fake',
+        OPENROUTER_BASE_URL: `http://127.0.0.1:${FAKE_LLM_PORT}/v1`,
       },
       stdio: ['ignore', 'pipe', 'inherit'],
     },
