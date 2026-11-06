@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../api';
+import { AgentPanel } from '../components/AgentPanel';
 import { BriefPanel } from '../components/BriefPanel';
 import { ErrorBox } from '../components/Form';
 import { HistoryPanel } from '../components/HistoryPanel';
@@ -54,6 +55,7 @@ export function SongPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
+  const [agentTrack, setAgentTrack] = useState<string | null>(null);
   const [title, setTitle] = useState('');
 
   const dirty = code !== savedCode;
@@ -130,6 +132,18 @@ export function SongPage() {
       setSaving(false);
     }
   };
+  /** The agent's proposal was saved on the server as a new version. */
+  const agentAccepted = async ({ songCode, versionId }: { songCode: string; versionId: number }) => {
+    const fresh = await api<SongDto>('GET', `/api/songs/${songId}`);
+    setSong(fresh);
+    setSavedCode(songCode);
+    setBaseVersionId(versionId);
+    replaceCode(songCode);
+    localStorage.removeItem(draftKey(songId));
+    setNotice(`Saved v${fresh.currentVersion.number} from the agent`);
+    setTimeout(() => setNotice(null), 2500);
+  };
+
   const saveRef = useRef(save);
   saveRef.current = save;
 
@@ -320,8 +334,29 @@ export function SongPage() {
         </div>
       )}
 
+      {canEdit && (
+        <AgentPanel
+          songId={song.id}
+          code={code}
+          baseVersionId={baseVersionId}
+          trackNames={parsed.tracks.map((t) => t.name)}
+          focusTrack={agentTrack}
+          onFocusTrack={setAgentTrack}
+          checkCode={(c) => player.current?.check(c) ?? Promise.resolve(null)}
+          onListen={replaceCode}
+          onAccepted={(r) => void agentAccepted(r)}
+          onRejected={replaceCode}
+        />
+      )}
+
       <div className={`song-grid ${showHistory || showBrief ? 'with-history' : ''}`}>
-        <Mixer parsed={parsed} code={code} readOnly={!canEdit} onChange={replaceCode} />
+        <Mixer
+          parsed={parsed}
+          code={code}
+          readOnly={!canEdit}
+          onChange={replaceCode}
+          onAskAgent={setAgentTrack}
+        />
         <StrudelPlayer
           ref={player}
           code={code}

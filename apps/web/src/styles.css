@@ -895,3 +895,34 @@ label.btn.disabled {
   font: inherit;
   font-size: 0.85rem;
 }
+
+/* ---------- agent ---------- */
+
+.agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-form {
+  gap: 8px;
+}
+
+.agent-off {
+  margin: 0;
+}
+
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.agent-diff {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+}

@@ -128,4 +128,44 @@ export const migrations: Migration[] = [
       ALTER TABLE songs ADD COLUMN midi_upload_id INTEGER REFERENCES midi_uploads(id) ON DELETE SET NULL;
     `,
   },
+  {
+    id: 5,
+    name: 'agent',
+    sql: `
+      CREATE TABLE agent_calls (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        song_id INTEGER REFERENCES songs(id) ON DELETE SET NULL,
+        purpose TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL,
+        cost_usd REAL NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX agent_calls_user_at ON agent_calls(user_id, created_at);
+      CREATE INDEX agent_calls_at ON agent_calls(created_at);
+
+      CREATE TABLE agent_proposals (
+        id INTEGER PRIMARY KEY,
+        song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        base_version_id INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+        instruction TEXT NOT NULL,
+        track TEXT,
+        tier TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        base_code TEXT NOT NULL,
+        code TEXT NOT NULL,
+        brief TEXT,
+        repairs INTEGER NOT NULL DEFAULT 0,
+        model TEXT NOT NULL,
+        cost_usd REAL NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX agent_proposals_song ON agent_proposals(song_id, id);
+    `,
+  },
 ];

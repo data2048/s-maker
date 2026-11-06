@@ -55,6 +55,16 @@ describe('static files', () => {
     expect(res.headers['access-control-allow-origin']).toBe('*');
   });
 
+  it('static files do not count towards the rate limit, the API does', async () => {
+    for (let i = 0; i < 700; i++) {
+      const res = await app.inject({ url: '/assets/app-abc123.js' });
+      if (res.statusCode !== 200) throw new Error(`request ${i}: ${res.statusCode}`);
+    }
+    let last = 0;
+    for (let i = 0; i < 601; i++) last = (await app.inject({ url: '/api/songs' })).statusCode;
+    expect(last).toBe(429);
+  });
+
   it('API responses do not get the permissive CORS header', async () => {
     const res = await app.inject({ url: '/api/auth/me', headers: { origin: 'null' } });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();

@@ -31,6 +31,8 @@ export interface StrudelPlayerHandle {
   play(): void;
   stop(): void;
   setCode(code: string): void;
+  /** Tries code without playing it. Resolves with the problem, or null when it is fine. */
+  check(code: string): Promise<string | null>;
 }
 
 interface Props {
@@ -55,6 +57,8 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
   ref,
 ) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const checks = useRef(new Map<number, (error: string | null) => void>());
+  const checkId = useRef(0);
   const [ready, setReady] = useState(false);
   const lastSent = useRef<string | null>(null);
   const callbacks = useRef({ onCodeChange, onStateChange, onSave });
@@ -72,6 +76,16 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
       lastSent.current = c;
       post({ type: 'setCode', code: c });
     },
+    check: (c: string) =>
+      new Promise<string | null>((resolve) => {
+        const id = ++checkId.current;
+        checks.current.set(id, resolve);
+        post({ type: 'check', id, code: c });
+        // Endless patterns can hang the player: not knowing is not an error of the code.
+        setTimeout(() => {
+          if (checks.current.delete(id)) resolve(null);
+        }, 10_000);
+      }),
   }));
 
   useEffect(() => {
@@ -90,6 +104,9 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
         if (msg.command === 'save') callbacks.current.onSave?.();
       } else if (msg.type === 'settings') {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(msg.settings));
+      } else if (msg.type === 'checked') {
+        checks.current.get(msg.id)?.(msg.error);
+        checks.current.delete(msg.id);
       } else if (msg.type === 'code') {
         lastSent.current = msg.code;
         callbacks.current.onCodeChange?.(msg.code);

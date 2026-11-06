@@ -22,6 +22,8 @@ export const toSandboxSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('play') }),
   z.object({ type: z.literal('stop') }),
   z.object({ type: z.literal('settings'), settings: editorSettingsSchema }),
+  /** Try code without playing it: does it evaluate, and do its sounds exist? */
+  z.object({ type: z.literal('check'), id: z.number().int(), code }),
 ]);
 export type ToSandbox = z.infer<typeof toSandboxSchema>;
 
@@ -39,6 +41,7 @@ export const fromSandboxSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('command'), command: z.enum(['save']) }),
   /** The user changed a preference in the player toolbar; the app saves it. */
   z.object({ type: z.literal('settings'), settings: editorSettingsSchema }),
+  z.object({ type: z.literal('checked'), id: z.number().int(), error: z.string().max(2000).nullable() }),
 ]);
 export type FromSandbox = z.infer<typeof fromSandboxSchema>;
 

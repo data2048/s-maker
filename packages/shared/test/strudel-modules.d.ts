@@ -7,3 +7,4 @@ declare module '@strudel/core' {
   export function noteToMidi(note: string): number;
 }
 declare module '@strudel/mini';
+declare module '@strudel/tonal';

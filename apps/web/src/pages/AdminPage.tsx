@@ -1,10 +1,11 @@
+import { AgentAdminTab } from '../components/AgentAdminTab';
 import type { AuditEntryDto, CreateInviteResponse, InviteDto, Role, UserDto } from '@s-maker/shared';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox } from '../components/Form';
 
-type Tab = 'users' | 'invites' | 'audit';
+type Tab = 'users' | 'invites' | 'agent' | 'audit';
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
 
@@ -14,7 +15,7 @@ export function AdminPage() {
     <section className="stack">
       <h1>Admin</h1>
       <div className="tabs" role="tablist">
-        {(['users', 'invites', 'audit'] as const).map((t) => (
+        {(['users', 'invites', 'agent', 'audit'] as const).map((t) => (
           <button
             key={t}
             role="tab"
@@ -28,6 +29,7 @@ export function AdminPage() {
       </div>
       {tab === 'users' && <UsersTab />}
       {tab === 'invites' && <InvitesTab />}
+      {tab === 'agent' && <AgentAdminTab />}
       {tab === 'audit' && <AuditTab />}
     </section>
   );

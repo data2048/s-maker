@@ -11,11 +11,13 @@ import {
   toSandboxSchema,
   type EditorSettings,
   type FromSandbox,
+  isValidNote,
+  parseTracks,
 } from '@s-maker/shared';
 import { codemirrorSettings, StrudelMirror } from '@strudel/codemirror';
 import { getDrawContext } from '@strudel/draw';
-import { transpiler } from '@strudel/transpiler';
-import { getAudioContext, initAudioOnFirstClick, webaudioOutput } from '@strudel/webaudio';
+import { evaluate as evaluateCode, transpiler } from '@strudel/transpiler';
+import { getAudioContext, initAudioOnFirstClick, soundMap, webaudioOutput } from '@strudel/webaudio';
 import { prebake } from './prebake';
 
 interface ReplState {
@@ -157,6 +159,63 @@ document.addEventListener(
   true,
 );
 
+// ---------- trying code without playing it ----------
+
+const CHECK_CYCLES = 8;
+/** A track may stay silent for a while: look this far before saying it plays nothing. */
+const CHECK_CYCLES_SILENT = 64;
+
+interface CheckHap {
+  value: { s?: unknown; bank?: unknown; note?: unknown } | null;
+}
+
+/** Evaluates every track on its own and looks at its first cycles. Returns the first problem, or null. */
+async function checkCode(code: string): Promise<string | null> {
+  const parsed = parseTracks(code);
+  if (!parsed.ok) return `Syntax error: ${parsed.error}`;
+  await (editor as { prebaked?: Promise<unknown> }).prebaked;
+  const first = parsed.tracks[0];
+  const header = first ? code.slice(0, first.range[0]) : code;
+  const scope = globalThis as unknown as Record<string, unknown>;
+  // Trying a song must not change the tempo of what is playing.
+  const saved = { setcpm: scope.setcpm, setcps: scope.setcps };
+  scope.setcpm = () => {};
+  scope.setcps = () => {};
+  const sounds = soundMap.get() as Record<string, unknown>;
+  try {
+    for (const track of parsed.tracks) {
+      try {
+        const { pattern } = (await evaluateCode(`${header}\n${track.body}`)) as {
+          pattern: { queryArc(a: number, b: number): CheckHap[] };
+        };
+        const haps = pattern.queryArc(0, CHECK_CYCLES);
+        for (const hap of haps) {
+          const note = hap.value?.note;
+          if (note !== undefined && !isValidNote(note))
+            return `Track "${track.name}": invalid note "${String(note)}"`;
+          const s = hap.value?.s;
+          if (typeof s !== 'string') continue;
+          const name = (typeof hap.value?.bank === 'string' ? `${hap.value.bank}_${s}` : s).toLowerCase();
+          if (!sounds[name.split(':')[0]!]) return `Track "${track.name}": unknown sound "${name}"`;
+        }
+        // A wrong scale name, for example, runs without an error and plays nothing.
+        if (
+          !haps.length &&
+          track.body.trim() !== 'silence' &&
+          !pattern.queryArc(0, CHECK_CYCLES_SILENT).length
+        )
+          return `Track "${track.name}" plays nothing. Check scale and chord names.`;
+      } catch (e) {
+        return `Track "${track.name}": ${e instanceof Error ? e.message : String(e)}`.slice(0, 1500);
+      }
+    }
+    return null;
+  } finally {
+    scope.setcpm = saved.setcpm;
+    scope.setcps = saved.setcps;
+  }
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
   // Accept commands only from the page that embeds us.
   if (event.source !== window.parent) return;
@@ -176,6 +235,9 @@ window.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'settings':
       applySettings(msg.settings);
+      break;
+    case 'check':
+      void checkCode(msg.code).then((error) => send({ type: 'checked', id: msg.id, error }));
       break;
   }
 });

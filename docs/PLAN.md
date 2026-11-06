@@ -145,7 +145,7 @@ Agent czyta go przy każdym wywołaniu i zwraca proponowane zmiany.
 - Klient OpenRouter (API zgodne z OpenAI), modele z konfiguracji. **Bez hardkodowania ID**, bo ID weryfikujemy na liście `/api/v1/models` w momencie implementacji:
   - `MODEL_FAST`: tani chiński, do drobnych zmian ścieżek i klasyfikacji MIDI;
   - `MODEL_STRONG`: najmocniejszy chiński, do komponowania i dużych przeróbek;
-  - `MODEL_FALLBACK`: na razie pusty, później OpenAI lub Claude.
+  - `MODEL_FALLBACK`: model innego dostawcy, gdy pierwszy zawiedzie; później może OpenAI lub Claude.
 - Odpowiedź agenta to **strukturalny JSON** (`trackChanges[]`, `briefChanges`, `summary`), a nie wolny tekst.
 - Pętla walidacji:
   1. walidator AST;
@@ -272,6 +272,17 @@ Każdy PR: osobny branch → testy i CI na zielono → **testujesz na VPS** (`./
 - Polecenie per ścieżka („zmień tę ścieżkę: …”) → walidacja → diff → akceptuj/odrzuć.
 - Log kosztów, limity per użytkownik i globalne, licznik w UI, panel admina.
 - `scripts/eval-models.ts` i pierwsze porównanie chińskich modeli.
+- Wynik porównania (2026-11-06, 12 zadań, kod uruchamiany w prawdziwym playerze; wszystkie modele 12/12):
+
+  | Model                           | Za 1. razem | Koszt 12 zadań | Średni czas | Rola     |
+  | ------------------------------- | ----------- | -------------- | ----------- | -------- |
+  | `deepseek/deepseek-v4.1-flash`  | 12          | $0,03          | 9 s         | szybki   |
+  | `deepseek/deepseek-v4-pro-0813` | 12          | $0,20          | 22 s        | mocny    |
+  | `z-ai/glm-5.3`                  | 11          | $0,07          | 17 s        | zapasowy |
+  | `qwen/qwen3.8-flash`            | 11          | $0,03          | 65 s        | za wolny |
+
+  Test sprawdza, czy kod działa, a nie czy brzmi dobrze: wybór trzeba jeszcze potwierdzić uchem. Modele zmienia się w panelu admina.
+
 - **Test:** na zaimportowanym utworze piszesz „zrób bas bardziej synkopowany”, dostajesz diff, akceptujesz i słyszysz zmianę; koszt widoczny w liczniku.
 
 #### PR 7: Czat z agentem i komponowanie od zera
