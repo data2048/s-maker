@@ -138,12 +138,18 @@ function renderState(started: boolean, pending: boolean, error: string | null): 
 playBtn.addEventListener('click', () => void editor.evaluate());
 stopBtn.addEventListener('click', () => void editor.stop());
 
-// Ctrl+Enter (Cmd+Enter on Mac) toggles play/stop. Strudel's own binding (kept for Alt+Enter) re-evaluates
+// Ctrl+S asks the app to save. Ctrl+Enter (Cmd+Enter on Mac) toggles play/stop. Strudel's own binding (kept for Alt+Enter) re-evaluates
 // the code, i.e. applies changes while playing. Capture phase: runs before CodeMirror's keymap.
 document.addEventListener(
   'keydown',
   (e) => {
-    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const mod = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+    if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      send({ type: 'command', command: 'save' });
+      return;
+    }
+    if (e.key !== 'Enter' || !mod) return;
     e.preventDefault();
     e.stopPropagation();
     void (isPlaying ? editor.stop() : editor.evaluate());

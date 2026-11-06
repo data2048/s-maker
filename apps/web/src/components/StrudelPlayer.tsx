@@ -38,6 +38,8 @@ interface Props {
   code: string;
   onCodeChange?(code: string): void;
   onStateChange?(state: PlayerState): void;
+  /** Ctrl+S pressed inside the player. */
+  onSave?(): void;
   className?: string;
 }
 
@@ -49,14 +51,14 @@ interface Props {
  * as the user or touch this page. We only exchange validated messages with it.
  */
 export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function StrudelPlayer(
-  { code, onCodeChange, onStateChange, className },
+  { code, onCodeChange, onStateChange, onSave, className },
   ref,
 ) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const lastSent = useRef<string | null>(null);
-  const callbacks = useRef({ onCodeChange, onStateChange });
-  callbacks.current = { onCodeChange, onStateChange };
+  const callbacks = useRef({ onCodeChange, onStateChange, onSave });
+  callbacks.current = { onCodeChange, onStateChange, onSave };
 
   const post = (msg: ToSandbox) => {
     // The frame's origin is opaque, so '*' is the only possible target. We send only song code.
@@ -84,6 +86,8 @@ export const StrudelPlayer = forwardRef<StrudelPlayerHandle, Props>(function Str
         callbacks.current.onStateChange?.({ ready: true, started: false, pending: false, error: null });
       } else if (msg.type === 'state') {
         callbacks.current.onStateChange?.({ ready: true, ...msg });
+      } else if (msg.type === 'command') {
+        if (msg.command === 'save') callbacks.current.onSave?.();
       } else if (msg.type === 'settings') {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(msg.settings));
       } else if (msg.type === 'code') {

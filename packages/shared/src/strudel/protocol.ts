@@ -35,6 +35,8 @@ export const fromSandboxSchema = z.discriminatedUnion('type', [
     pending: z.boolean(),
     error: z.string().max(2000).nullable(),
   }),
+  /** Keyboard shortcut pressed in the player that the app handles (Ctrl+S = save). */
+  z.object({ type: z.literal('command'), command: z.enum(['save']) }),
   /** The user changed a preference in the player toolbar; the app saves it. */
   z.object({ type: z.literal('settings'), settings: editorSettingsSchema }),
 ]);

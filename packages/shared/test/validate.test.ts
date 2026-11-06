@@ -6,7 +6,7 @@ const ok = (code: string) => validateStrudelCode(code, 'strict');
 describe('validateStrudelCode: normal Strudel code passes', () => {
   it.each([
     ['simple', `s("bd sd [~ bd] sd").bank("RolandTR909")`],
-    ['labels and setcpm', `setcpm(90/4)\n$: note("c3 e3 g3").s("gm_acoustic_grand_piano")\n_$: s("hh*8")`],
+    ['labels and setcpm', `setcpm(90/4)\n$: note("c3 e3 g3").s("gm_piano")\n_$: s("hh*8")`],
     [
       'stack and functions',
       `stack(\n  n("0 2 4 <5 7>").scale("C:minor").s("sawtooth").lpf(sine.range(400, 2000).slow(8)),\n  s("bd*4").gain(.9)\n).room(.3)`,

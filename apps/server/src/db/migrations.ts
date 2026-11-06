@@ -75,4 +75,37 @@ export const migrations: Migration[] = [
       CREATE INDEX audit_log_at ON audit_log(at);
     `,
   },
+  {
+    id: 3,
+    name: 'songs',
+    sql: `
+      CREATE TABLE songs (
+        id INTEGER PRIMARY KEY,
+        owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        visibility TEXT NOT NULL CHECK (visibility IN ('group', 'private')),
+        forked_from_song_id INTEGER REFERENCES songs(id) ON DELETE SET NULL,
+        forked_from_version_id INTEGER REFERENCES song_versions(id) ON DELETE SET NULL,
+        brief TEXT,
+        current_version_id INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX songs_owner ON songs(owner_id);
+      CREATE INDEX songs_updated ON songs(updated_at);
+
+      CREATE TABLE song_versions (
+        id INTEGER PRIMARY KEY,
+        song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        number INTEGER NOT NULL,
+        parent_version_id INTEGER REFERENCES song_versions(id) ON DELETE SET NULL,
+        author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        author_kind TEXT NOT NULL CHECK (author_kind IN ('user', 'agent')),
+        message TEXT,
+        code TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE (song_id, number)
+      );
+    `,
+  },
 ];

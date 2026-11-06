@@ -32,7 +32,7 @@ export async function prebake(): Promise<void> {
     modulesLoading,
     registerSynthSounds(),
     registerZZFXSounds(),
-    // General MIDI instruments: s("gm_acoustic_grand_piano"), s("gm_electric_bass_finger"), ...
+    // General MIDI instruments: s("gm_piano"), s("gm_electric_bass_finger"), ...
     import('@strudel/soundfonts').then(({ registerSoundfonts }) => registerSoundfonts()),
     samples(`${DOUGH}/tidal-drum-machines.json`),
     samples(`${DOUGH}/piano.json`),

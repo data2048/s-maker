@@ -122,11 +122,16 @@ Udostępniony utwór kolegi lub kod od agenta to dowolny JS, a podatny na to jes
 
 ```
 Song { id, ownerId, title, visibility: group|private, forkedFromId, brief: MusicBrief, currentVersionId }
-SongVersion { id, songId, parentVersionId, author: user|agent, message, header, tracks[] }
-Track { id, name, instrument, code, muted, solo }
+SongVersion { id, songId, number, parentVersionId, author: user|agent, message, code }
 ```
 
-Pełny kod składany jest z nagłówka (`setcpm(...)`, ładowanie sampli) i ścieżek jako etykietowanych wzorców Strudel (`bass: ...`, wyciszona `_bass: ...`). Mute i solo to zmiana etykiety, a każda ścieżka ma osobny edytor. Widok „pełny kod” pozwala skopiować całość do strudel.cc.
+(Zmienione w PR 3.) Wersja utworu to **jeden kod Strudel**, tak jak na strudel.cc. Ścieżki to etykietowane wzorce najwyższego poziomu (`bass: ...`), a ich lista w mikserze jest wyprowadzana z kodu parserem (`packages/shared/src/strudel/tracks.ts`):
+
+- mute to wbudowany w Strudel prefiks `_bass:`, a solo to prefiks `Sbass:`;
+- instrument to `.s("gm_...")`, a automat perkusyjny to `.bank("...")`;
+- zmiany z miksera to małe edycje tekstu kodu.
+
+Dzięki temu edytor, mikser i odtwarzacz zawsze pokazują to samo, działa podświetlanie nut, a kod można skopiować 1:1 do strudel.cc.
 
 **3. Music Brief**: obiekt JSON z 14 elementami, globalnie i opcjonalnie per sekcja. Wypełniany:
 
